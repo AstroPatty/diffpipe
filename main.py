@@ -7,8 +7,7 @@ from diffpipe.header import copy_header
 
 MAX_LEVEL = 7
 
-output_dir = Path("output")
-
+output_dir = Path("/Volumes/workspace/data/LastJourney/synthetic_galaxies/toolkit")
 HEADER_SOURCE = "header.hdf5"
 
 
@@ -35,7 +34,7 @@ def process_all_files(core_folder, synth_core_folder):
         slice = int(file.stem.split("-")[1].split(".")[0])
         synth_core_slices.add(slice)
 
-    if not core_slices == synth_core_slices:
+    if synth_core_slices and not core_slices == synth_core_slices:
         raise ValueError(
             "Synthetic cores and halo cores do not have all the same slices!"
         )
@@ -48,17 +47,17 @@ def process_all_files(core_folder, synth_core_folder):
         )
         files_by_slice[slice] = {
             "cores": core_slice_files,
-            "synthetic_cores": synth_core_slice_files,
+            # "synthetic_cores": synth_core_slice_files,
             "output": output_dir / Path(f"lc_cores-{slice}.diffsky_gals.hdf5"),
             "all_slices": core_slices,
         }
-
-    # for slice, fs in files_by_slice.items():
-    #    write_files(slice, fs, MAX_LEVEL)
 
     with Pool(8) as p:
         p.map(write, files_by_slice.items())
 
 
 if __name__ == "__main__":
-    process_all_files("data", "data/synthetic_cores")
+    process_all_files(
+        "/Volumes/workspace/data/LastJourney/synthetic_galaxies/original",
+        "data/synthetic_cores",
+    )

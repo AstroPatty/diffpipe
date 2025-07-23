@@ -22,7 +22,7 @@ def get_arrangement(max_level, files):
     for file in files:
         with h5py.File(file) as f:
             ra = f["data"]["ra_nfw"][:]
-            dec = f["data"]["dec"][:]
+            dec = f["data"]["dec_nfw"][:]
             maps.update({file: make_map(max_level, ra, dec)})
     index = make_index(max_level, *maps.values())
     return maps, index
