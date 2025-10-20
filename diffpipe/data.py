@@ -39,6 +39,11 @@ UNIT_MAP = {
     "top_host_infall_fof_halo_eigS3X": u.Mpc / cu.littleh,
     "top_host_infall_fof_halo_eigS3Y": u.Mpc / cu.littleh,
     "top_host_infall_fof_halo_eigS3Z": u.Mpc / cu.littleh,
+    "ra_obs": u.deg,
+    "dec_obs": u.deg,
+    "kappa": None,
+    "shear1": None,
+    "shear2": None,
 }
 
 

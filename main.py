@@ -7,7 +7,7 @@ from diffpipe.header import copy_header
 
 MAX_LEVEL = 7
 
-output_dir = Path("/Volumes/workspace/data/LastJourney/synthetic_galaxies/toolkit")
+output_dir = Path("/eagle/LastJourney/pwells/diffsky_lc_mocks_bugfix")
 HEADER_SOURCE = "header.hdf5"
 
 
@@ -52,12 +52,12 @@ def process_all_files(core_folder, synth_core_folder):
             "all_slices": core_slices,
         }
 
-    with Pool(8) as p:
+    with Pool(64) as p:
         p.map(write, files_by_slice.items())
 
 
 if __name__ == "__main__":
     process_all_files(
-        "/Volumes/workspace/data/LastJourney/synthetic_galaxies/original",
-        "data/synthetic_cores",
+            "/eagle/LastJourney/prlarsen/diffsky_lc_mocks_bugfix/diffsky_lc_mocks",
+            "/home"
     )
