@@ -5,6 +5,19 @@ import numpy as np
 from healpy.pixelfunc import ang2pix
 
 
+def verify_index(output_path, max_level):
+    with h5py.File(output_path) as f:
+        ra = f["data"]["ra"][:]
+        dec = f["data"]["dec"][:]
+        pixel_assignments = ang2pix(2**max_level, ra, dec, lonlat=True, nest=True)
+        size = f["index"][f"level_{max_level}"]["size"][:]
+    pixels_to_check = np.where(size > 0)[0]
+    pixels, sizes = np.unique(pixel_assignments, return_counts=True)
+    assert np.all(pixels == pixels_to_check)
+    assert np.all(sizes == size[pixels_to_check])
+    assert np.all(np.sort(pixel_assignments) == pixel_assignments)
+
+
 def get_counts(max_level, file):
     file = h5py.File(file)
     ra = file["data"]["ra_nfw"][:]
@@ -17,41 +30,27 @@ def get_counts(max_level, file):
     return {i: c for i, c in zip(indices, counts)}
 
 
-def get_arrangement(max_level, files):
-    maps = {}
-    for file in files:
-        with h5py.File(file) as f:
-            ra = f["data"]["ra_nfw"][:]
-            dec = f["data"]["dec_nfw"][:]
-            maps.update({file: make_map(max_level, ra, dec)})
-    index = make_index(max_level, *maps.values())
-    return maps, index
+def combine_counts(counts):
+    unique_keys = set(chain.from_iterable(c.keys() for c in counts.values()))
+    totals = {}
+    for key in unique_keys:
+        total = sum(c.get(key, 0) for c in counts.values())
+        totals[key] = total
+    return totals
 
 
-def make_file_map(max_level: int, file):
+def make_combined_file_map(max_level: int, files: list):
+    pixel_assignments = [get_pixels(max_level, f) for f in files]
+
+    pixel_assignments = np.concat(pixel_assignments)
+    file_maps = np.argsort(pixel_assignments)
+
+    return file_maps
+
+
+def get_pixels(max_level: int, file):
     with h5py.File(file) as f:
         ra = f["data"]["ra_nfw"][:]
         dec = f["data"]["dec_nfw"][:]
-        return make_map(max_level, ra, dec)
-
-
-def make_map(max_level: int, ra: np.ndarray, dec: np.ndarray):
     nside = 2**max_level
-    idxs = ang2pix(nside, ra, dec, lonlat=True, nest=True)
-
-    indices, counts = np.unique(idxs, return_counts=True)
-    count_totals = np.cumsum(counts)[:-1]
-
-    sort = np.argsort(idxs)
-    sort = np.split(sort, count_totals)
-    return {idx: slice for idx, slice in zip(indices, sort)}
-
-
-def make_index(max_level: int, *maps: dict):
-    nside = 2**max_level
-    spatial_index = np.zeros(12 * nside * nside, dtype=np.uint32)
-    unique_idxs = set(chain.from_iterable(m.keys() for m in maps))
-    for idx in unique_idxs:
-        spatial_index[idx] = sum(len(m.get(idx, [])) for m in maps)
-
-    return spatial_index
+    return ang2pix(nside, ra, dec, lonlat=True, nest=True)
