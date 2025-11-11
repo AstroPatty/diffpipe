@@ -45,6 +45,5 @@ def process_all_files(core_folder):
     with Pool(len(files_by_slice)) as p:
         p.map(write, files_by_slice.items())
 
-
 if __name__ == "__main__":
     process_all_files("/lcrc/project/halotools/random_data/1107/smdpl_dr1")
