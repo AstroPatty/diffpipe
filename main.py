@@ -7,7 +7,7 @@ from diffpipe.header import copy_header
 
 MAX_LEVEL = 10
 
-output_dir = Path("./output")
+output_dir = Path("/lcrc/project/halotools/prwells/diffsky/11072025")
 HEADER_SOURCE = "header.hdf5"
 
 
@@ -42,9 +42,9 @@ def process_all_files(core_folder):
             "all_slices": core_slices,
         }
 
-    with Pool(1) as p:
+    with Pool(len(files_by_slice)) as p:
         p.map(write, files_by_slice.items())
 
 
 if __name__ == "__main__":
-    process_all_files("./data")
+    process_all_files("/lcrc/project/halotools/random_data/1107/smdpl_dr1")

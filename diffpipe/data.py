@@ -153,11 +153,13 @@ def allocate_file(output, files, total_length):
     columns = set()
     file_columns = set()
     dtypes = {}
+    
     for file in files:
         with h5py.File(file) as f:
             file_columns = set(f["data"].keys())
             columns.update(file_columns)
             dtypes = {k: col.dtype for k, col in f["data"].items()}
+            shapes = {k: col.shape for k, col in f["data"].items()}
     if not file_columns == columns:
         raise ValueError("Files do not have the same columns")
 
@@ -174,8 +176,10 @@ def allocate_file(output, files, total_length):
                 "dec", shape=(total_length,), dtype=dtype, compression=COMPRESSION
             )
         else:
+            shape = (total_length,) + shapes[col][1:]
+
             data_group.create_dataset(
-                col, shape=(total_length,), dtype=dtype, compression=COMPRESSION
+                col, shape=shape, dtype=dtype, compression=COMPRESSION
             )
 
     return output_file
