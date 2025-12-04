@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+from opencosmo.spatial.models import HealPixRegionModel
 
 LASTJOURNEY_NSTEPS = 500
 I_SEED = 10041972
@@ -19,7 +20,14 @@ lj_steps_a = np.linspace(1 / (1 + Z_INI), 1 / (1 + Z_FIN), N_STEPS + 1)[1:]
 lj_steps = 1 / lj_steps_a - 1
 
 
-def copy_header(source: str, dest: str, step: int, all_steps: set[int]):
+def copy_header(
+    source: str,
+    dest: str,
+    step: int,
+    all_steps: set[int],
+    pixels_with_data: np.ndarray,
+    nside: int,
+):
     FILE_PARS = {
         "data_type": "diffsky_fits",
         "is_lightcone": True,
@@ -28,6 +36,9 @@ def copy_header(source: str, dest: str, step: int, all_steps: set[int]):
         "unit_convention": "comoving",
         "origin": "HACC",
     }
+    region_model = HealPixRegionModel(pixels=pixels_with_data, nside=nside).model_dump()
+    for key, value in region_model:
+        FILE_PARS[f"region_{key}"] = value
     all_steps = np.fromiter(all_steps, dtype=int)
     all_steps.sort()
     idx = np.where(all_steps == step)[0][0]

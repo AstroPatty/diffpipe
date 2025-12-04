@@ -80,7 +80,7 @@ def write_files(slice, core_files, output_path, max_level):
 
     target = allocate_file(output_path, core_files, len(file_map))
     write_single_file(max_level, core_files, target, file_map)
-    write_index(target, counts["cores"], max_level)
+    pixels_with_data = write_index(target, counts["cores"], max_level)
     with h5py.File(core_files[0]) as attr_source:
         write_column_attributes(target, attr_source)
 
@@ -94,6 +94,7 @@ def write_files(slice, core_files, output_path, max_level):
 
     target.close()
     verify_index(output_path, max_level)
+    return pixels_with_data
 
 
 def write_index(output_file, counts, max_level):
@@ -115,6 +116,7 @@ def write_index(output_file, counts, max_level):
         starts[pixel] = running_total
         running_total += pixel_count
     starts[max_ + 1 :] = running_total
+    pixels_with_data = np.where(sizes > 0)[0]
 
     for level in range(max_level, -1, -1):
         level_group = index_group.require_group(f"level_{level}")
@@ -122,6 +124,7 @@ def write_index(output_file, counts, max_level):
         level_group.create_dataset("size", data=sizes, compression=COMPRESSION)
         sizes = sizes.reshape(-1, 4).sum(axis=1)
         starts = np.insert(np.cumsum(sizes), 0, 0)[:-1]
+    return pixels_with_data
 
 
 def write_single_file(max_level, source_files, file_target, file_map):
@@ -142,6 +145,8 @@ def write_column(output_data_group, sources, column_name, full_map):
     unit = UNIT_MAP.get(column_name, None)
     if unit == u.Mpc / cu.littleh:
         data = data / LITTLE_H
+    if "lsst" in column_name:
+        unit = u.ABmag
 
     output_ds = output_data_group[column_name]
     output_ds[:] = data[full_map]

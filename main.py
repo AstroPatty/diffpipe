@@ -18,10 +18,12 @@ def write(data):
     core_files = config.pop("cores")
     core_files.sort()
 
-    write_files(
+    pixels_with_data = write_files(
         slice=slice, core_files=core_files, output_path=output, max_level=MAX_LEVEL
     )
-    copy_header(HEADER_SOURCE, output, slice, all_slices)
+    copy_header(
+        HEADER_SOURCE, output, slice, all_slices, pixels_with_data, 2**MAX_LEVEL
+    )
 
 
 def process_all_files(core_folder):
