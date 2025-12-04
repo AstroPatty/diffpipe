@@ -29,7 +29,7 @@ def write(data):
 def process_all_files(core_folder):
     if not output_dir.exists():
         os.mkdir(output_dir)
-    core_files = list(Path(core_folder).glob("*.hdf5"))
+    core_files = list(Path(core_folder).glob("lc_cores*.hdf5"))
     core_slices = set()
     for file in core_files:
         slice = int(file.stem.split("-")[1].split(".")[0])
@@ -46,6 +46,7 @@ def process_all_files(core_folder):
 
     with Pool(len(files_by_slice)) as p:
         p.map(write, files_by_slice.items())
+
 
 if __name__ == "__main__":
     process_all_files("/lcrc/project/halotools/random_data/1107/smdpl_dr1")

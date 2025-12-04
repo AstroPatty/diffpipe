@@ -91,6 +91,10 @@ def write_files(slice, core_files, output_path, max_level):
         versions_group = header.require_group("diffsky_versions")
         for par, val in version_pars.items():
             versions_group.attrs[par] = val
+        if meta := dict(version_source["metadata"].attrs):
+            metadata_group = header.require_group("metadata")
+            for par, val in meta.items():
+                metadata_group[par] = val
 
     target.close()
     verify_index(output_path, max_level)
@@ -158,7 +162,7 @@ def allocate_file(output, files, total_length):
     columns = set()
     file_columns = set()
     dtypes = {}
-    
+
     for file in files:
         with h5py.File(file) as f:
             file_columns = set(f["data"].keys())
