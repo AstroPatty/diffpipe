@@ -119,6 +119,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "astropy" },
     { name = "astropy-healpix" },
+    { name = "click" },
     { name = "h5py" },
     { name = "healpix" },
     { name = "healpy" },
@@ -132,6 +133,7 @@ dependencies = [
 requires-dist = [
     { name = "astropy", specifier = ">=7.1.0" },
     { name = "astropy-healpix", specifier = ">=1.1.2" },
+    { name = "click", specifier = ">=8.3.1" },
     { name = "h5py", specifier = ">=3.14.0" },
     { name = "healpix", specifier = ">=2024.2" },
     { name = "healpy", specifier = ">=1.18.1" },

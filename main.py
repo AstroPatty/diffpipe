@@ -26,7 +26,7 @@ def write(data):
     )
 
 
-def process_all_files(core_folder):
+def process_all_files(core_folder, synthetic_core_folder):
     if not output_dir.exists():
         os.mkdir(output_dir)
     core_files = list(Path(core_folder).glob("lc_cores*.hdf5"))
