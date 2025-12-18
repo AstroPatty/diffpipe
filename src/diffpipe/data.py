@@ -3,6 +3,7 @@ import h5py
 import hdf5plugin
 import numpy as np
 from astropy.cosmology import units as cu
+from loguru import logger
 
 from diffpipe.index import (
     combine_counts,
@@ -52,6 +53,11 @@ UNIT_MAP = {
     "shear1": None,
     "shear2": None,
 }
+
+
+def process_slice(step_number, step_data):
+    logger.info(f"Working on slice {step_number}")
+    pass
 
 
 def write_column_attributes(target, source):
