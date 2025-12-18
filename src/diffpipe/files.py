@@ -72,6 +72,7 @@ def get_files_by_slice(folder: Path) -> dict[int, list[Path]]:
             filter(lambda f: f"lc_cores-{slice}" in f.stem, core_files)
         )
         files_by_slice[slice] = core_slice_files
+    return files_by_slice
 
 
 def get_file_pixel(path: Path):
