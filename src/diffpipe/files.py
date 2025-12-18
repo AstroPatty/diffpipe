@@ -1,14 +1,51 @@
+import sys
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 import h5py
+from loguru import logger
 
 
 class FileType(Enum):
     CORE = 1
     SYNTH_CORE = 2
+
+
+def build_work_orders(
+    core_folder: Path,
+    synthetic_core_folders: Optional[Path],
+    output_folder: Path,
+    overwrite: bool,
+):
+    files_by_slice = build_file_lists(core_folder, synthetic_core_folders)
+    all_slices = set(files_by_slice.keys())
+    output_paths = get_output_paths(output_folder, all_slices, overwrite)
+    for slice in all_slices:
+        files_by_slice[slice]["output_path"] = output_paths[slice]
+        files_by_slice[slice]["all_slices"] = all_slices
+
+    return files_by_slice
+
+
+def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool):
+    output_folder.mkdir(parents=True, exist_ok=True)
+    existing_hdf5_files = list(output_folder.glob("*.hdf5"))
+    if existing_hdf5_files:
+        logger.warning("Output folder has existing hdf5 files, continuing anyway...")
+
+    output_paths = {}
+    for slice in slices:
+        output_file_path = output_folder / Path(f"lc_cores-{slice}.diffsky_gals.hdf5")
+        if output_file_path.exists() and not overwrite:
+            logger.critical(
+                f"Found an existing catalog file at {output_file_path}. Run with --overwrite to ignore"
+            )
+            sys.exit()
+        output_paths[slice] = output_file_path
+
+    return output_paths
 
 
 def build_file_lists(core_folder: Path, synthetic_core_folder: Optional[Path]):
@@ -33,14 +70,16 @@ def verify_file_lists(
     if not core_files_by_slice or all(
         len(paths) == 0 for paths in core_files_by_slice.values()
     ):
-        raise ValueError("Found no core files to convert!")
+        logger.critical("Found no core files to convert!")
+        sys.exit()
     if not synthetic_core_files_by_slice:
         return True
 
     if set(core_files_by_slice.keys()) != set(synthetic_core_files_by_slice.keys()):
-        raise ValueError(
+        logger.critical(
             "The simulated cores and synthetic cores do not have the same set of redshift slices!"
         )
+        sys.exit()
 
     for slice, core_files in core_files_by_slice.items():
         synthetic_core_files = synthetic_core_files_by_slice[slice]
@@ -48,9 +87,10 @@ def verify_file_lists(
         synthetic_core_pixels = set(map(get_file_pixel, synthetic_core_files))
 
         if core_pixels != synthetic_core_pixels:
-            raise ValueError(
+            logger.critical(
                 f"Core and synthetic core files for slice {slice} do not cover the same pixels!"
             )
+            sys.exit()
     return True
 
 
