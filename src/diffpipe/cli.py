@@ -1,12 +1,16 @@
 import multiprocessing
+import sys
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
 import click
 from loguru import logger
 
+from diffpipe import BadInputError
 from diffpipe.data import process_slice
 from diffpipe.files import build_work_orders
+from diffpipe.header import get_simulation_header_data
 
 DATA_FOLDER = click.Path(
     exists=True, file_okay=False, readable=True, resolve_path=True, path_type=Path
@@ -26,7 +30,7 @@ def diffpipe():
 @click.argument("core_folder", required=True, type=DATA_FOLDER)
 @click.option(
     "--synth-core-folder",
-    "-s",
+    "-f",
     is_flag=False,
     required=False,
     type=DATA_FOLDER,
@@ -47,12 +51,32 @@ def diffpipe():
     type=int,
     help="Number of processes. If not provided, inferred from execution environment",
 )
+@click.option(
+    "--index-depth",
+    "-d",
+    is_flag=False,
+    required=False,
+    default=10,
+    type=int,
+    help="Depth of spatial index. Will use a healpix decomposition with nside = 2**index_depth. Defaults to 10",
+)
+@click.option(
+    "--simulation",
+    "-s",
+    is_flag=False,
+    required=False,
+    default="LastJourney",
+    type=str,
+    help="Underlying simulation this catalog was built on. Defaults to LastJourney",
+)
 def run(
     core_folder: Path,
     synth_core_folder: Optional[Path],
     output_folder: Path,
     overwrite: bool,
     n_procs: Optional[int],
+    index_depth: int,
+    simulation: str,
 ):
     """
     Convert diffsky catalogs in CORE_FOLDER into opencosmo-formatted files,
@@ -60,22 +84,29 @@ def run(
     synthetic-core-based catalogs.
     """
 
+    try:
+        _ = get_simulation_header_data(simulation)
+    except BadInputError:
+        logger.critical("Terminating due to previous error")
+        sys.exit(1)
+
     work_orders = build_work_orders(
-        core_folder, synth_core_folder, output_folder, overwrite
+        core_folder, synth_core_folder, output_folder, simulation, overwrite
     )
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
     logger.info(f"Running conversion with {n_procs} processes")
+    run_step_f = partial(run_step, index_depth=index_depth, simulation=simulation)
     with multiprocessing.Pool(n_procs) as pool:
-        pool.map(run_step, work_orders.items())
+        pool.map(run_step_f, work_orders.items())
 
     logger.success("All files processed!")
 
 
-def run_step(step_data):
+def run_step(step_data, index_depth: int, simulation: str):
     step, data = step_data
-    return process_slice(step, data)
+    return process_slice(step, data, index_depth, simulation)
 
 
 diffpipe.add_command(run)

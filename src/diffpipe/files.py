@@ -1,11 +1,14 @@
 import sys
 from collections import defaultdict
 from enum import Enum
+from itertools import chain
 from pathlib import Path
 from typing import Iterable, Optional
 
 import h5py
 from loguru import logger
+
+from diffpipe.header import get_simulation_header_data, verify_incoming_metadata
 
 
 class FileType(Enum):
@@ -17,8 +20,11 @@ def build_work_orders(
     core_folder: Path,
     synthetic_core_folders: Optional[Path],
     output_folder: Path,
+    simulation: str,
     overwrite: bool,
 ):
+    _ = get_simulation_header_data(simulation)
+
     files_by_slice = build_file_lists(core_folder, synthetic_core_folders)
     all_slices = set(files_by_slice.keys())
     output_paths = get_output_paths(output_folder, all_slices, overwrite)
@@ -33,7 +39,9 @@ def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool
     output_folder.mkdir(parents=True, exist_ok=True)
     existing_hdf5_files = list(output_folder.glob("*.hdf5"))
     if existing_hdf5_files:
-        logger.warning("Output folder has existing hdf5 files, continuing anyway...")
+        logger.warning(
+            "Output folder has existing hdf5 files, but there are no name clashes. Continuing anyway..."
+        )
 
     output_paths = {}
     for slice in slices:
@@ -72,6 +80,14 @@ def verify_file_lists(
     ):
         logger.critical("Found no core files to convert!")
         sys.exit()
+
+    all_core_files = list(chain(*[files for files in core_files_by_slice.values()]))
+    all_synth_core_files = list(
+        chain(*[files for files in synthetic_core_files_by_slice.values()])
+    )
+    verify_incoming_metadata(all_core_files + all_synth_core_files)
+    logger.success("Metadata is consistent across files!")
+
     if not synthetic_core_files_by_slice:
         return True
 

@@ -5,6 +5,8 @@ import numpy as np
 from astropy.cosmology import units as cu
 from loguru import logger
 
+from diffpipe.files import FileType
+from diffpipe.header import write_opencosmo_header
 from diffpipe.index import (
     combine_counts,
     get_counts,
@@ -55,9 +57,47 @@ UNIT_MAP = {
 }
 
 
-def process_slice(step_number, step_data):
-    logger.info(f"Working on slice {step_number}")
-    pass
+def process_slice(slice, step_data, index_depth, simulation):
+    logger.info(f"Working on slice {slice}")
+    core_files = step_data[FileType.CORE]  # required
+    output_path = step_data["output_path"]  # required
+    all_slices = step_data["all_slices"]  # required
+
+    synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
+
+    pixels_with_data = write_files(slice, core_files, output_path, index_depth)
+
+    write_opencosmo_header(
+        core_files[0],
+        output_path,
+        simulation,
+        slice,
+        all_slices,
+        pixels_with_data,
+        index_depth,
+    )
+    logger.success(f"Successfully wrote data for slice {slice}")
+
+
+def write_files(slice, core_files, output_path, max_level):
+    counts = {}
+
+    counts["cores"] = {f: get_counts(max_level, f) for f in core_files}
+    file_map = make_combined_file_map(max_level, core_files)
+
+    target = allocate_file(output_path, core_files, len(file_map))
+    write_single_file(max_level, core_files, target, file_map)
+    pixels_with_data = write_index(target, counts["cores"], max_level)
+    with h5py.File(core_files[0]) as attr_source:
+        write_column_attributes(target, attr_source)
+
+    # Not, we've already verified that this information is
+    # consistent across all files
+    version_source = core_files[0]
+
+    target.close()
+    verify_index(output_path, max_level)
+    return pixels_with_data
 
 
 def write_column_attributes(target, source):
@@ -75,36 +115,6 @@ def write_column_attributes(target, source):
         if "units" in attrs:
             attrs.pop("units")
         data_group[column].attrs.update(attrs)
-
-
-def write_files(slice, core_files, output_path, max_level):
-    print(f"Working on slice {slice}")
-    counts = {}
-
-    counts["cores"] = {f: get_counts(max_level, f) for f in core_files}
-    file_map = make_combined_file_map(max_level, core_files)
-
-    target = allocate_file(output_path, core_files, len(file_map))
-    write_single_file(max_level, core_files, target, file_map)
-    pixels_with_data = write_index(target, counts["cores"], max_level)
-    with h5py.File(core_files[0]) as attr_source:
-        write_column_attributes(target, attr_source)
-
-    version_source = core_files[0]
-    with h5py.File(version_source) as f:
-        version_pars = f["metadata"]["version_info"].attrs
-        header = target.file.require_group("header")
-        versions_group = header.require_group("diffsky_versions")
-        for par, val in version_pars.items():
-            versions_group.attrs[par] = val
-        if meta := dict(version_source["metadata"].attrs):
-            metadata_group = header.require_group("metadata")
-            for par, val in meta.items():
-                metadata_group[par] = val
-
-    target.close()
-    verify_index(output_path, max_level)
-    return pixels_with_data
 
 
 def write_index(output_file, counts, max_level):
