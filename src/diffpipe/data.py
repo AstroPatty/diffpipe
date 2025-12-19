@@ -97,9 +97,9 @@ def process_slice(slice, step_data, index_depth, simulation):
 
 def verify_column_consistency(files: list[Path]):
     """
-    Verify that all files have the same columns, for each column, that:
+    Verify that all files have the same columns, and for each column, that:
     1. The shapes are compatible (identical after 0th axis)
-    2. The data types are identical
+    2. The data types are compatible
     """
 
     with h5py.File(files[0]) as reference:
