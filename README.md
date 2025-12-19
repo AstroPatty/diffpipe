@@ -10,7 +10,7 @@ pip install git+https://github.com/AstroPatty/diffpipe.git
 
 # Usage
 
-This tool exposes a single command line script, `diffpipe run`. See `diffpipe run --help` for usage details.
+This tool exposes a single command line script, `diffpipe run`. See `diffpipe run --help` for usage details. It produces nice logs you can check, and should always fail with an easy-to-understand error.
 
 # Implemented Checks
 
@@ -23,3 +23,6 @@ This package does extensive checking on the incoming data before performing any 
 5. For each column, ensure that shapes are consistent (identical beyond the 0th dimension) across all files
 6. For each column, ensure that metdata (e.g. description and unit) is consistent across all files 
 7. For each column, ensure that data types are consistent across all files. Data types do not need to have the same precision, but should have the same base type (e.g. float32 and float64 is allowed, float32 and int32 is not). Data in the output file is always promoted to the highest precision of all inputs.
+
+
+
