@@ -1,6 +1,7 @@
 import astropy.units as u
 import h5py
 import hdf5plugin
+import healpy as hp
 import numpy as np
 from astropy.cosmology import units as cu
 from loguru import logger
@@ -20,6 +21,13 @@ COMPRESSION = hdf5plugin.Blosc2(
 
 LITTLE_H = 0.6766
 u.add_enabled_units(cu)
+
+UNIT_WILDCARDS = {
+    "lsst_": u.ABmag,
+    "roman_F": u.ABmag,
+    "roman_Grism": u.ABmag,
+    "roman_Pirsm": u.ABmag,
+}
 
 UNIT_MAP = {
     "logmp0": u.DexUnit(u.M_sun),
@@ -56,6 +64,9 @@ UNIT_MAP = {
     "shear2": None,
 }
 
+COLUMNS_TO_SKIP = ["ra", "dec"]
+COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
+
 
 def process_slice(slice, step_data, index_depth, simulation):
     logger.info(f"Working on slice {slice}")
@@ -65,7 +76,9 @@ def process_slice(slice, step_data, index_depth, simulation):
 
     synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
 
-    pixels_with_data = write_files(slice, core_files, output_path, index_depth)
+    pixels_with_data = write_files(
+        slice, core_files, synth_core_files, output_path, index_depth
+    )
 
     write_opencosmo_header(
         core_files[0],
@@ -79,48 +92,61 @@ def process_slice(slice, step_data, index_depth, simulation):
     logger.success(f"Successfully wrote data for slice {slice}")
 
 
-def write_files(slice, core_files, output_path, max_level):
+def write_files(slice, core_files, synth_core_files, output_path, max_level):
     counts = {}
 
-    counts["cores"] = {f: get_counts(max_level, f) for f in core_files}
-    file_map = make_combined_file_map(max_level, core_files)
+    counts[FileType.CORE] = {f: get_counts(max_level, f) for f in core_files}
+    file_map = {}
+    file_map[FileType.CORE] = make_combined_file_map(max_level, core_files)
+    if synth_core_files is not None:
+        counts[FileType.SYNTH_CORE] = {
+            f: get_counts(max_level, f) for f in synth_core_files
+        }
+        file_map[FileType.SYNTH_CORE] = make_combined_file_map(
+            max_level, synth_core_files
+        )
 
-    target = allocate_file(output_path, core_files, len(file_map))
-    write_single_file(max_level, core_files, target, file_map)
-    pixels_with_data = write_index(target, counts["cores"], max_level)
-    with h5py.File(core_files[0]) as attr_source:
-        write_column_attributes(target, attr_source)
+    files = {FileType.CORE: core_files}
+    if synth_core_files is not None:
+        files[FileType.SYNTH_CORE] = synth_core_files
+
+    allocate_file(output_path, files, file_map)
+    with h5py.File(output_path, "a") as target:
+        write_single_file(max_level, files, target, file_map)
+        pixels_with_data = write_indices(target, counts, max_level)
+        if FileType.SYNTH_CORE in files and len(files) > 1:
+            if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
+            if_group.attrs["synth_cores"] = True
 
     # Not, we've already verified that this information is
     # consistent across all files
-    version_source = core_files[0]
 
     target.close()
-    verify_index(output_path, max_level)
+    with h5py.File(output_path) as target:
+        for group_name, group in target.items():
+            if group_name in ["index", "header"]:
+                continue
+            verify_index(group, max_level)
     return pixels_with_data
 
 
-def write_column_attributes(target, source):
-    data_group = target["data"]
+def write_indices(target, counts, max_level):
+    if len(counts) == 1:
+        file_type = next(iter(counts.keys()))
+        return write_index(target, counts[file_type], max_level)
 
-    for column in source["data"].keys():
-        if column in ["ra_nfw", "dec_nfw"]:
-            continue
-        attrs = dict(source["data"][column].attrs)
-        unit = UNIT_MAP.get(column, "None")
-        if unit == u.Mpc / cu.littleh:
-            unit = u.Mpc
-
-        attrs["unit"] = str(unit)
-        if "units" in attrs:
-            attrs.pop("units")
-        data_group[column].attrs.update(attrs)
+    pixels_with_data = np.array([], dtype=int)
+    for file_type, file_type_counts in counts.items():
+        output_group = target[file_type.value]
+        file_type_pixels = write_index(output_group, file_type_counts, max_level)
+        pixels_with_data = np.union1d(pixels_with_data, file_type_pixels)
+    return pixels_with_data
 
 
-def write_index(output_file, counts, max_level):
-    index_group = output_file.require_group("index")
+def write_index(output_group, counts, max_level):
+    index_group = output_group.require_group("index")
     nside = 2**max_level
-    npix = 12 * nside * nside
+    npix = hp.nside2npix(nside)
     starts = np.zeros(npix, dtype=np.int32)
     sizes = np.zeros(npix, dtype=np.int32)
     combined_counts = combine_counts(counts)
@@ -148,63 +174,85 @@ def write_index(output_file, counts, max_level):
 
 
 def write_single_file(max_level, source_files, file_target, file_map):
-    sources = [h5py.File(s) for s in source_files]
-    for column_name in sources[0]["data"].keys():
-        write_column(file_target["data"], sources, column_name, file_map)
+    if len(source_files) == 1:
+        file_type = next(iter(source_files.keys()))
+        sources = [h5py.File(s) for s in source_files[file_type]]
+        for column_name in sources[0]["data"].keys():
+            write_column(file_target["data"], sources, column_name, file_map[file_type])
+        return
+    for file_type, file_type_sources in source_files.items():
+        sources = [h5py.File(s) for s in source_files[file_type]]
+        for column_name in sources[0]["data"].keys():
+            write_column(
+                file_target[f"{file_type.value}/data"],
+                sources,
+                column_name,
+                file_map[file_type],
+            )
 
 
 def write_column(output_data_group, sources, column_name, full_map):
     data = np.concat([source["data"][column_name][:] for source in sources])
-    if column_name in ["ra", "dec"]:
+    attributes = dict(sources[0]["data"][column_name].attrs)
+    if column_name in COLUMNS_TO_SKIP:
         return
-    elif column_name == "ra_nfw":
-        column_name = "ra"
-    elif column_name == "dec_nfw":
-        column_name = "dec"
+
+    output_column_name = COLUMN_RENAMES.get(column_name, column_name)
 
     unit = UNIT_MAP.get(column_name, None)
-    if unit == u.Mpc / cu.littleh:
-        data = data / LITTLE_H
-    if "lsst" in column_name:
-        unit = u.ABmag
+    if unit is None:
+        for pattern, pattern_unit in UNIT_WILDCARDS.items():
+            if output_column_name.startswith(pattern):
+                unit = pattern_unit
+                break
+    try:
+        bases = unit.bases
+        index = bases.index(cu.littleh)
+        h_power = unit.powers[index]
+    except (ValueError, AttributeError):
+        h_power = 0
 
-    output_ds = output_data_group[column_name]
+    if h_power != 0:
+        data = data / LITTLE_H**h_power
+        unit = unit / LITTLE_H**h_power
+
+    attributes["unit"] = str(unit)
+    output_ds = output_data_group[output_column_name]
     output_ds[:] = data[full_map]
+    output_ds.attrs.update(attributes)
 
 
-def allocate_file(output, files, total_length):
-    output_file = h5py.File(output, "w")
-
-    columns = set()
-    file_columns = set()
+def allocate_dataset_group(group, source_files, total_length):
+    data_group = group.require_group("data")
+    column_metadata_source = source_files[0]
+    shapes = {}
     dtypes = {}
+    with h5py.File(column_metadata_source) as source_f:
+        for colname, col in source_f["data"].items():
+            shapes[colname] = col.shape[1:]
+            dtypes[colname] = col.dtype
 
-    for file in files:
-        with h5py.File(file) as f:
-            file_columns = set(f["data"].keys())
-            columns.update(file_columns)
-            dtypes = {k: col.dtype for k, col in f["data"].items()}
-            shapes = {k: col.shape for k, col in f["data"].items()}
-    if not file_columns == columns:
-        raise ValueError("Files do not have the same columns")
-
-    data_group = output_file.require_group("data")
     for col, dtype in dtypes.items():
-        if col == "ra" or col == "dec":
+        if col in COLUMNS_TO_SKIP:
             continue
-        elif col == "ra_nfw":
-            data_group.create_dataset(
-                "ra", shape=(total_length,), dtype=dtype, compression=COMPRESSION
-            )
-        elif col == "dec_nfw":
-            data_group.create_dataset(
-                "dec", shape=(total_length,), dtype=dtype, compression=COMPRESSION
+        name = COLUMN_RENAMES.get(col, col)
+        shape = (total_length,) + shapes[col]
+
+        data_group.create_dataset(
+            name, shape=shape, dtype=dtype, compression=COMPRESSION
+        )
+
+
+def allocate_file(output_path, source_files, file_map):
+    with h5py.File(output_path, "w") as f_output:
+        if len(file_map) == 1:
+            file_type = next(iter(file_map.keys()))
+            allocate_dataset_group(
+                f_output, source_files[file_type], len(file_map[file_type])
             )
         else:
-            shape = (total_length,) + shapes[col][1:]
-
-            data_group.create_dataset(
-                col, shape=shape, dtype=dtype, compression=COMPRESSION
-            )
-
-    return output_file
+            for file_type, file_type_map in file_map.items():
+                group = f_output.require_group(file_type.value)
+                allocate_dataset_group(
+                    group, source_files[file_type], len(file_type_map)
+                )

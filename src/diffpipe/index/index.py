@@ -5,12 +5,11 @@ import numpy as np
 from healpy.pixelfunc import ang2pix
 
 
-def verify_index(output_path, max_level):
-    with h5py.File(output_path) as f:
-        ra = f["data"]["ra"][:]
-        dec = f["data"]["dec"][:]
-        pixel_assignments = ang2pix(2**max_level, ra, dec, lonlat=True, nest=True)
-        size = f["index"][f"level_{max_level}"]["size"][:]
+def verify_index(group, max_level):
+    ra = group["data"]["ra"][:]
+    dec = group["data"]["dec"][:]
+    pixel_assignments = ang2pix(2**max_level, ra, dec, lonlat=True, nest=True)
+    size = group["index"][f"level_{max_level}"]["size"][:]
     pixels_to_check = np.where(size > 0)[0]
     pixels, sizes = np.unique(pixel_assignments, return_counts=True)
     assert np.all(pixels == pixels_to_check)

@@ -12,8 +12,8 @@ from diffpipe.header import get_simulation_header_data, verify_incoming_metadata
 
 
 class FileType(Enum):
-    CORE = 1
-    SYNTH_CORE = 2
+    CORE = "cores"
+    SYNTH_CORE = "synth_cores"
 
 
 def build_work_orders(
