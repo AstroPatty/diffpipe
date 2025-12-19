@@ -8,6 +8,7 @@ from typing import Iterable, Optional
 import h5py
 from loguru import logger
 
+from diffpipe import data
 from diffpipe.header import get_simulation_header_data, verify_incoming_metadata
 
 
@@ -24,8 +25,13 @@ def build_work_orders(
     overwrite: bool,
 ):
     _ = get_simulation_header_data(simulation)
-
     files_by_slice = build_file_lists(core_folder, synthetic_core_folders)
+    all_files = []
+    for files in files_by_slice.values():
+        for files_by_type in files.values():
+            all_files += files_by_type
+    data.verify_column_consistency(all_files)
+
     all_slices = set(files_by_slice.keys())
     output_paths = get_output_paths(output_folder, all_slices, overwrite)
     for slice in all_slices:

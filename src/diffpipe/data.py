@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 import astropy.units as u
 import h5py
 import hdf5plugin
@@ -92,6 +95,54 @@ def process_slice(slice, step_data, index_depth, simulation):
     logger.success(f"Successfully wrote data for slice {slice}")
 
 
+def verify_column_consistency(files: list[Path]):
+    """
+    Verify that all files have the same columns, for each column, that:
+    1. The shapes are compatible (identical after 0th axis)
+    2. The data types are identical
+    """
+
+    with h5py.File(files[0]) as reference:
+        reference_shapes = {
+            colname: col.shape[1:] for colname, col in reference["data"].items()
+        }
+        reference_dtypes = {
+            colname: col.dtype for colname, col in reference["data"].items()
+        }
+        reference_attrs = {
+            colname: dict(col.attrs) for colname, col in reference["data"].items()
+        }
+    for file_path in files[1:]:
+        with h5py.File(file_path) as to_compare:
+            shapes = {
+                colname: col.shape[1:] for colname, col in to_compare["data"].items()
+            }
+            dtypes = {colname: col.dtype for colname, col in to_compare["data"].items()}
+            attrs = {
+                colname: dict(col.attrs) for colname, col in to_compare["data"].items()
+            }
+            if set(shapes.keys()) != set(reference_shapes.keys()):
+                logger.critical("Files do not all have the same columns!")
+                sys.exit(1)
+            if shapes != reference_shapes:
+                logger.critical("Column shapes are not consistent across files!")
+                sys.exit(1)
+            if attrs != reference_attrs:
+                logger.critical("Column attributes are not consistent across files!")
+                sys.exit(1)
+
+            for name, rdtype in reference_dtypes.items():
+                target_dtype = dtypes[name]
+                promoted_type = np.promote_types(rdtype, target_dtype)
+                if promoted_type not in [rdtype, target_dtype]:
+                    # Columns may have different precision (numpy will automatically promote later)
+                    # But we are avoiding situations where we have eg. int and float
+                    logger.critical("Column dtypes are not consistent across files!")
+                    sys.exit(1)
+
+    logger.success("Columns are consistent across files!")
+
+
 def write_files(slice, core_files, synth_core_files, output_path, max_level):
     counts = {}
 
@@ -117,9 +168,6 @@ def write_files(slice, core_files, synth_core_files, output_path, max_level):
         if FileType.SYNTH_CORE in files and len(files) > 1:
             if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
             if_group.attrs["synth_cores"] = True
-
-    # Not, we've already verified that this information is
-    # consistent across all files
 
     target.close()
     with h5py.File(output_path) as target:
