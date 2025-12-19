@@ -67,6 +67,9 @@ def build_file_lists(core_folder: Path, synthetic_core_folder: Optional[Path]):
     core_files_by_slice = get_files_by_slice(core_folder)
     if synthetic_core_folder is not None:
         synthetic_core_files_by_slice = get_files_by_slice(synthetic_core_folder)
+    if synthetic_core_folder is not None and not synthetic_core_files_by_slice:
+        logger.critical("Got a synthetic core folder, but did not find any files!")
+        sys.exit(1)
 
     verify_file_lists(core_files_by_slice, synthetic_core_files_by_slice)
     output = defaultdict(dict)

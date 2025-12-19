@@ -171,10 +171,13 @@ def write_files(slice, core_files, synth_core_files, output_path, max_level):
 
     target.close()
     with h5py.File(output_path) as target:
-        for group_name, group in target.items():
-            if group_name in ["index", "header"]:
-                continue
-            verify_index(group, max_level)
+        if len(files) > 1:
+            for group_name, group in target.items():
+                if group_name == "header":
+                    continue
+                verify_index(group, max_level)
+        else:
+            verify_index(target, max_level)
     return pixels_with_data
 
 
