@@ -26,7 +26,7 @@ EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent acr
     "metadata/software_version_info",
 ]
 
-ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date"]}
+ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 
 
 METADATA_ATTRIBUTE_GROUPS_TO_COPY = {  # These will be copied into the OpenCosmo Header

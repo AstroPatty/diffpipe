@@ -265,12 +265,13 @@ def write_column(output_data_group, sources, column_name, full_map):
 
     if h_power != 0:
         data = data / LITTLE_H**h_power
-        unit = unit / LITTLE_H**h_power
+        unit = unit / cu.littleh**h_power
 
     attributes["unit"] = str(unit)
     output_ds = output_data_group[output_column_name]
     output_ds[:] = data[full_map]
     output_ds.attrs.update(attributes)
+    output_data_group.file.flush()
 
 
 def allocate_dataset_group(group, source_files, total_length):

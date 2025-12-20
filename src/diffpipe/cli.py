@@ -3,6 +3,8 @@ import sys
 from functools import partial
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 
 import click
 from loguru import logger
@@ -98,8 +100,10 @@ def run(
         n_procs = multiprocessing.cpu_count()
     logger.info(f"Running conversion with {n_procs} processes")
     run_step_f = partial(run_step, index_depth=index_depth, simulation=simulation)
-    with multiprocessing.Pool(n_procs) as pool:
-        pool.map(run_step_f, work_orders.items())
+    with ProcessPoolExecutor(max_workers=n_procs) as ex:
+        futures = [ex.submit(run_step_f, item) for item in work_orders.items()]
+        for fut in as_completed(futures):
+            fut.result()
 
     logger.success("All files processed!")
 
