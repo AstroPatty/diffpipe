@@ -139,8 +139,8 @@ def write_opencosmo_header(
     region_model = HealPixRegionModel(
         pixels=pixels_with_data, nside=2**index_depth
     ).model_dump()
-    for key, value in region_model.items():
-        FILE_PARS[f"region_{key}"] = value
+    # for key, value in region_model.items():
+    #    FILE_PARS[f"region_{key}"] = value
     all_steps = np.fromiter(all_steps, dtype=int)
     all_steps.sort()
     idx = np.where(all_steps == step)[0][0]
@@ -157,6 +157,7 @@ def write_opencosmo_header(
 
         file_group = f_output.require_group("header/file")
         for key, val in FILE_PARS.items():
+            print(val)
             file_group.attrs[key] = val
         lightcone_group = f_output.require_group("header/lightcone")
         lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]

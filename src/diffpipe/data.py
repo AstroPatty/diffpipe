@@ -25,48 +25,6 @@ COMPRESSION = hdf5plugin.Blosc2(
 LITTLE_H = 0.6766
 u.add_enabled_units(cu)
 
-UNIT_WILDCARDS = {
-    "lsst_": u.ABmag,
-    "roman_F": u.ABmag,
-    "roman_Grism": u.ABmag,
-    "roman_Pirsm": u.ABmag,
-}
-
-UNIT_MAP = {
-    "logmp0": u.DexUnit(u.M_sun),
-    "logmp_obs": u.DexUnit(u.M_sun),
-    "logmp_obs_host": u.DexUnit(u.M_sun),
-    "logsm_obs": u.DexUnit(u.M_sun),
-    "logssfr_obs": u.DexUnit(1 / u.year),
-    "x": u.Mpc / cu.littleh,
-    "y": u.Mpc / cu.littleh,
-    "z": u.Mpc / cu.littleh,
-    "x_host": u.Mpc / cu.littleh,
-    "y_host": u.Mpc / cu.littleh,
-    "z_host": u.Mpc / cu.littleh,
-    "x_nfw": u.Mpc / cu.littleh,
-    "y_nfw": u.Mpc / cu.littleh,
-    "z_nfw": u.Mpc / cu.littleh,
-    "ra": u.deg,
-    "dec": u.deg,
-    "ra_nfw": u.deg,
-    "dec_nfw": u.deg,
-    "top_host_infall_fof_halo_eigS1X": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS1Y": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS1Z": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS2X": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS2Y": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS2Z": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS3X": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS3Y": u.Mpc / cu.littleh,
-    "top_host_infall_fof_halo_eigS3Z": u.Mpc / cu.littleh,
-    "ra_obs": u.deg,
-    "dec_obs": u.deg,
-    "kappa": None,
-    "shear1": None,
-    "shear2": None,
-}
-
 COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 
@@ -249,25 +207,21 @@ def write_column(output_data_group, sources, column_name, full_map):
         return
 
     output_column_name = COLUMN_RENAMES.get(column_name, column_name)
+    if attributes["unit"] != "":
+        unit = u.Unit(attributes["unit"])
 
-    unit = UNIT_MAP.get(column_name, None)
-    if unit is None:
-        for pattern, pattern_unit in UNIT_WILDCARDS.items():
-            if output_column_name.startswith(pattern):
-                unit = pattern_unit
-                break
-    try:
-        bases = unit.bases
-        index = bases.index(cu.littleh)
-        h_power = unit.powers[index]
-    except (ValueError, AttributeError):
-        h_power = 0
+        try:
+            bases = unit.bases
+            index = bases.index(cu.littleh)
+            h_power = unit.powers[index]
+        except (ValueError, AttributeError):
+            h_power = 0
 
-    if h_power != 0:
-        data = data / LITTLE_H**h_power
-        unit = unit / cu.littleh**h_power
+        if h_power != 0:
+            data = data / LITTLE_H**h_power
+            unit = unit / cu.littleh**h_power
+            attributes["unit"] = str(unit)
 
-    attributes["unit"] = str(unit)
     output_ds = output_data_group[output_column_name]
     output_ds[:] = data[full_map]
     output_ds.attrs.update(attributes)
