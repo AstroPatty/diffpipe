@@ -62,7 +62,6 @@ def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool
 
 
 def build_file_lists(input_folder):
-    synthetic_core_files_by_slice = {}
     all_files_by_slice = get_files_by_slice(input_folder)
     core_files_by_slice, synth_core_files_by_slice = split_slice_files(
         all_files_by_slice
@@ -71,8 +70,8 @@ def build_file_lists(input_folder):
     output = defaultdict(dict)
     for slice, core_files in core_files_by_slice.items():
         output[slice][FileType.CORE] = core_files
-        if synthetic_core_files_by_slice:
-            output[slice][FileType.SYNTH_CORE] = synthetic_core_files_by_slice[slice]
+        if synth_core_files_by_slice:
+            output[slice][FileType.SYNTH_CORE] = synth_core_files_by_slice[slice]
     return output
 
 
