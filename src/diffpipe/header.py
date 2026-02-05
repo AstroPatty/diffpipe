@@ -157,7 +157,6 @@ def write_opencosmo_header(
 
         file_group = f_output.require_group("header/file")
         for key, val in FILE_PARS.items():
-            print(val)
             file_group.attrs[key] = val
         lightcone_group = f_output.require_group("header/lightcone")
         lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]

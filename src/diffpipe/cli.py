@@ -1,10 +1,9 @@
 import multiprocessing
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
 
 import click
 from loguru import logger
@@ -29,15 +28,7 @@ def diffpipe():
 
 
 @click.command()
-@click.argument("core_folder", required=True, type=DATA_FOLDER)
-@click.option(
-    "--synth-core-folder",
-    "-f",
-    is_flag=False,
-    required=False,
-    type=DATA_FOLDER,
-    help="Path to folder containing synthetic core catalogs",
-)
+@click.argument("input_folder", required=True, type=DATA_FOLDER)
 @click.argument("output_folder", required=True, type=OUTPUT_FOLDER)
 @click.option(
     "--overwrite",
@@ -73,7 +64,6 @@ def diffpipe():
 )
 def run(
     core_folder: Path,
-    synth_core_folder: Optional[Path],
     output_folder: Path,
     overwrite: bool,
     n_procs: Optional[int],
@@ -92,9 +82,7 @@ def run(
         logger.critical("Terminating due to previous error")
         sys.exit(1)
 
-    work_orders = build_work_orders(
-        core_folder, synth_core_folder, output_folder, simulation, overwrite
-    )
+    work_orders = build_work_orders(core_folder, output_folder, simulation, overwrite)
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()

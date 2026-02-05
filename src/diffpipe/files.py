@@ -3,7 +3,7 @@ from collections import defaultdict
 from enum import Enum
 from itertools import chain
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 import h5py
 from loguru import logger
@@ -18,14 +18,13 @@ class FileType(Enum):
 
 
 def build_work_orders(
-    core_folder: Path,
-    synthetic_core_folders: Optional[Path],
+    input_folder: Path,
     output_folder: Path,
     simulation: str,
     overwrite: bool,
 ):
     _ = get_simulation_header_data(simulation)
-    files_by_slice = build_file_lists(core_folder, synthetic_core_folders)
+    files_by_slice = build_file_lists(input_folder)
     all_files = []
     for files in files_by_slice.values():
         for files_by_type in files.values():
@@ -62,16 +61,13 @@ def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool
     return output_paths
 
 
-def build_file_lists(core_folder: Path, synthetic_core_folder: Optional[Path]):
+def build_file_lists(input_folder):
     synthetic_core_files_by_slice = {}
-    core_files_by_slice = get_files_by_slice(core_folder)
-    if synthetic_core_folder is not None:
-        synthetic_core_files_by_slice = get_files_by_slice(synthetic_core_folder)
-    if synthetic_core_folder is not None and not synthetic_core_files_by_slice:
-        logger.critical("Got a synthetic core folder, but did not find any files!")
-        sys.exit(1)
-
-    verify_file_lists(core_files_by_slice, synthetic_core_files_by_slice)
+    all_files_by_slice = get_files_by_slice(input_folder)
+    core_files_by_slice, synth_core_files_by_slice = split_slice_files(
+        all_files_by_slice
+    )
+    verify_file_lists(core_files_by_slice, synth_core_files_by_slice)
     output = defaultdict(dict)
     for slice, core_files in core_files_by_slice.items():
         output[slice][FileType.CORE] = core_files
@@ -138,6 +134,20 @@ def get_files_by_slice(folder: Path) -> dict[int, list[Path]]:
         )
         files_by_slice[slice] = core_slice_files
     return files_by_slice
+
+
+def split_slice_files(files_by_slice: dict[int, list[Path]]):
+    core_output = {}
+    synth_core_output = {}
+    for slice, files in files_by_slice.items():
+        synth_core_files = list(
+            filter(lambda p: p.stem.endswith("diffsky_gals.synthetic_halos"))
+        )
+        core_files = list(filter(lambda p: p.stem.endswith("diffsky_gals")))
+        core_output[slice] = core_files
+        if synth_core_files:
+            synth_core_output[slice] = synth_core_files
+    return core_output, synth_core_output
 
 
 def get_file_pixel(path: Path):
