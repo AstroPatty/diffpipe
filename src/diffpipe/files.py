@@ -141,9 +141,9 @@ def split_slice_files(files_by_slice: dict[int, list[Path]]):
     synth_core_output = {}
     for slice, files in files_by_slice.items():
         synth_core_files = list(
-            filter(lambda p: p.stem.endswith("diffsky_gals.synthetic_halos"))
+            filter(lambda p: p.stem.endswith("diffsky_gals.synthetic_halos"), files)
         )
-        core_files = list(filter(lambda p: p.stem.endswith("diffsky_gals")))
+        core_files = list(filter(lambda p: p.stem.endswith("diffsky_gals"), files))
         core_output[slice] = core_files
         if synth_core_files:
             synth_core_output[slice] = synth_core_files

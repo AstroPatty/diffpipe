@@ -63,7 +63,7 @@ def diffpipe():
     help="Underlying simulation this catalog was built on. Defaults to LastJourney",
 )
 def run(
-    core_folder: Path,
+    input_folder: Path,
     output_folder: Path,
     overwrite: bool,
     n_procs: Optional[int],
@@ -82,7 +82,7 @@ def run(
         logger.critical("Terminating due to previous error")
         sys.exit(1)
 
-    work_orders = build_work_orders(core_folder, output_folder, simulation, overwrite)
+    work_orders = build_work_orders(input_folder, output_folder, simulation, overwrite)
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
