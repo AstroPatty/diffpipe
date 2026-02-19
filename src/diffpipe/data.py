@@ -225,13 +225,8 @@ def write_single_file(max_level, source_files, file_target, file_map):
 
 
 def write_column(output_data_group, sources, column_name, full_map):
-    from time import time
-
-    start = time()
     data = np.concat([source["data"][column_name][:] for source in sources])
     attributes = dict(sources[0]["data"][column_name].attrs)
-    end = time()
-    print(f"Reading column {column_name} took {round(end - start, 3)}")
     if column_name in COLUMNS_TO_SKIP:
         return
 
