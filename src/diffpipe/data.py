@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,22 +35,43 @@ def process_slice(slice, step_data, index_depth, simulation):
     core_files = step_data[FileType.CORE]  # required
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
+    scratch_path: Path = step_data.get("scratch_path")
 
     synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
 
+    if scratch_path is not None:
+        slice_dir = scratch_path / f"{slice}"
+        logger.info(f"Copying data for slice {slice} to scratch at {slice_dir}")
+        slice_dir.mkdir(parents=False, exist_ok=False)
+        scratch_output = scratch_path / "output"
+        scratch_output.mkdir(parents=False, exist_ok=True)
+        for file in core_files:
+            shutil.copy(file, slice_dir)
+        if synth_core_files is not None:
+            for file in synth_core_files:
+                shutil.copy(file, slice_dir)
+
+        file_output_path = scratch_output / output_path.name
+    else:
+        file_output_path = output_path
+
     pixels_with_data = write_files(
-        slice, core_files, synth_core_files, output_path, index_depth
+        slice, core_files, synth_core_files, file_output_path, index_depth
     )
 
     write_opencosmo_header(
         core_files[0],
-        output_path,
+        file_output_path,
         simulation,
         slice,
         all_slices,
         pixels_with_data,
         index_depth,
     )
+    if scratch_path is not None:
+        shutil.copy(file_output_path, output_path)
+        file_output_path.unlink()
+        shutil.rmtree(slice_dir)
     logger.success(f"Successfully wrote data for slice {slice}")
 
 
@@ -201,8 +223,13 @@ def write_single_file(max_level, source_files, file_target, file_map):
 
 
 def write_column(output_data_group, sources, column_name, full_map):
+    from time import time
+
+    start = time()
     data = np.concat([source["data"][column_name][:] for source in sources])
     attributes = dict(sources[0]["data"][column_name].attrs)
+    end = time()
+    print(f"Reading column {column_name} took {round(end - start, 3)}")
     if column_name in COLUMNS_TO_SKIP:
         return
 

@@ -30,6 +30,7 @@ def diffpipe():
 @click.command()
 @click.argument("input_folder", required=True, type=DATA_FOLDER)
 @click.argument("output_folder", required=True, type=OUTPUT_FOLDER)
+@click.option("--scratch", required=False, type=OUTPUT_FOLDER)
 @click.option(
     "--overwrite",
     "-o",
@@ -65,6 +66,7 @@ def diffpipe():
 def run(
     input_folder: Path,
     output_folder: Path,
+    scratch: Optional[Path],
     overwrite: bool,
     n_procs: Optional[int],
     index_depth: int,
@@ -82,7 +84,9 @@ def run(
         logger.critical("Terminating due to previous error")
         sys.exit(1)
 
-    work_orders = build_work_orders(input_folder, output_folder, simulation, overwrite)
+    work_orders = build_work_orders(
+        input_folder, output_folder, scratch, simulation, overwrite
+    )
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
