@@ -47,7 +47,9 @@ def process_slice(slice, step_data, index_depth, simulation):
         scratch_output.mkdir(parents=False, exist_ok=True)
         for file in core_files:
             shutil.copy(file, slice_dir)
+        core_files = [slice_dir / f.name for f in core_files]
         if synth_core_files is not None:
+            synth_core_files = [slice_dir / f.name for f in synth_core_files]
             for file in synth_core_files:
                 shutil.copy(file, slice_dir)
 
