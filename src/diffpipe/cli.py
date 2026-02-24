@@ -1,4 +1,5 @@
 import multiprocessing
+import shutil
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
@@ -31,6 +32,7 @@ def diffpipe():
 @click.argument("input_folder", required=True, type=DATA_FOLDER)
 @click.argument("output_folder", required=True, type=OUTPUT_FOLDER)
 @click.option("--scratch", required=False, type=OUTPUT_FOLDER)
+@click.option("--pre-copy", "-p", is_flag=True)
 @click.option(
     "--overwrite",
     "-o",
@@ -67,6 +69,7 @@ def run(
     input_folder: Path,
     output_folder: Path,
     scratch: Optional[Path],
+    pre_copy: bool,
     overwrite: bool,
     n_procs: Optional[int],
     index_depth: int,
@@ -84,8 +87,19 @@ def run(
         logger.critical("Terminating due to previous error")
         sys.exit(1)
 
+    scratch_path = scratch
+    if scratch is not None:
+        scratch_path = scratch / "diffpipe"
+        scratch_path.mkdir(parents=False, exist_ok=False)
+
+    if pre_copy and scratch_path is not None:
+        files_to_copy = input_folder.glob("*.hdf5")
+        for file in files_to_copy:
+            shutil.copy(file, scratch_path)
+        input_folder = scratch_path
+
     work_orders = build_work_orders(
-        input_folder, output_folder, scratch, simulation, overwrite
+        input_folder, output_folder, scratch_path, simulation, overwrite
     )
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
