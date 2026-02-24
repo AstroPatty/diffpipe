@@ -123,6 +123,7 @@ def write_opencosmo_header(
     all_steps: set[int],
     pixels_with_data: np.ndarray,
     index_depth: int,
+    z_phot_table: np.ndarray,
 ):
     copy_required_header_attributes(source_file_path, output_file_path)
     additional_header_data = get_simulation_header_data(simulation_name)
@@ -160,3 +161,6 @@ def write_opencosmo_header(
             file_group.attrs[key] = val
         lightcone_group = f_output.require_group("header/lightcone")
         lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]
+        f_output["header"]["catalog_info"].create_dataset(
+            "z_phot_table", data=z_phot_table
+        )

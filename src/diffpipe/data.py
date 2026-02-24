@@ -19,6 +19,7 @@ from diffpipe.index import (
     make_combined_file_map,
     verify_index,
 )
+from diffpipe.updaters import UPDATERS
 
 COMPRESSION = hdf5plugin.Blosc2(
     cname="lz4", clevel=5, filters=hdf5plugin.Blosc2.BITSHUFFLE
@@ -77,6 +78,7 @@ def process_slice(slice, step_data, index_depth, simulation):
         index_depth,
         global_offset,
     )
+    z_phot_table = get_z_phot_tables(step_data)
 
     write_opencosmo_header(
         core_files[0],
@@ -86,6 +88,7 @@ def process_slice(slice, step_data, index_depth, simulation):
         all_slices,
         pixels_with_data,
         index_depth,
+        z_phot_table,
     )
     if scratch_path is not None:
         shutil.copy(file_output_path, output_path)
@@ -96,6 +99,23 @@ def process_slice(slice, step_data, index_depth, simulation):
             file.unlink()
 
     logger.success(f"Successfully wrote data for slice {slice}")
+
+
+def get_z_phot_tables(slice_files):
+    z_range = (np.inf, -np.inf)
+    n = 0
+    files = slice_files[FileType.CORE] + slice_files.get(FileType.SYNTH_CORE, [])
+    for file in files:
+        with h5py.File(file) as f:
+            z_phot_table = f["metadata"]["z_phot_table"][:]
+            if z_phot_table.min() < z_range[0]:
+                z_range = (z_phot_table.min(), z_range[1])
+            if z_phot_table.max() > z_range[1]:
+                z_range = (z_range[0], z_phot_table.max())
+            if len(z_phot_table) > n:
+                n = len(z_phot_table)
+
+    return np.linspace(*z_range, n)
 
 
 def get_columns_in_group(group: h5py.Group, verify_length=True):
@@ -276,16 +296,17 @@ def write_single_file(max_level, source_files, file_target, file_map, global_off
             )
         dataset_length = len(dataset_group["gal_id"])
         ids = global_offset + local_offset + np.arange(dataset_length)
-        print(ids)
 
         dataset_group["gal_id"][:] = ids
-        print(dataset_group["gal_id"])
 
         local_offset += dataset_length
 
 
 def write_column(output_data_group, sources, column_name, full_map):
-    data = np.concat([source[:] for source in sources])
+    if column_name in UPDATERS:
+        data = UPDATERS[column_name](sources, full_map)
+    else:
+        data = np.concat([source[:] for source in sources])
     attributes = dict(sources[0].attrs)
     if column_name in COLUMNS_TO_SKIP:
         return
