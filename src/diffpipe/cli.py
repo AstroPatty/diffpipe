@@ -93,6 +93,7 @@ def run(
         scratch_path.mkdir(parents=False, exist_ok=False)
 
     if pre_copy and scratch_path is not None:
+        logger.info("Copying data to scratch...")
         files_to_copy = input_folder.glob("*.hdf5")
         for file in files_to_copy:
             shutil.copy(file, scratch_path)
