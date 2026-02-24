@@ -34,13 +34,29 @@ def build_work_orders(
 
     all_slices = set(files_by_slice.keys())
     output_paths = get_output_paths(output_folder, all_slices, overwrite)
+    global_offset = 0
     for slice in all_slices:
         files_by_slice[slice]["output_path"] = output_paths[slice]
         files_by_slice[slice]["all_slices"] = all_slices
         if scratch is not None:
             files_by_slice[slice]["scratch_path"] = scratch
 
+        total_length = get_total_length(files_by_slice[slice])
+        files_by_slice[slice]["global_offset"] = global_offset
+        global_offset += total_length
+
     return files_by_slice
+
+
+def get_total_length(files_by_slice):
+    core_files = files_by_slice[FileType.CORE]
+    synth_core_files = files_by_slice.get(FileType.SYNTH_CORE, [])
+    total = 0
+    for file in core_files + synth_core_files:
+        with h5py.File(file) as f:
+            ds = next(iter(f["data"].values()))
+            total += len(ds)
+    return total
 
 
 def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool):
@@ -69,6 +85,7 @@ def build_file_lists(input_folder):
     core_files_by_slice, synth_core_files_by_slice = split_slice_files(
         all_files_by_slice
     )
+
     verify_file_lists(core_files_by_slice, synth_core_files_by_slice)
     output = defaultdict(dict)
     for slice, core_files in core_files_by_slice.items():

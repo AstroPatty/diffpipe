@@ -29,6 +29,7 @@ u.add_enabled_units(cu)
 
 COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
+UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
 
 
 def process_slice(slice, step_data, index_depth, simulation):
@@ -36,6 +37,7 @@ def process_slice(slice, step_data, index_depth, simulation):
     core_files = step_data[FileType.CORE]  # required
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
+    global_offset = step_data["global_offset"]
     scratch_path: Optional[Path] = step_data.get("scratch_path")
     synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
 
@@ -68,7 +70,12 @@ def process_slice(slice, step_data, index_depth, simulation):
         file_output_path = output_path
 
     pixels_with_data = write_files(
-        slice, core_files, synth_core_files, file_output_path, index_depth
+        slice,
+        core_files,
+        synth_core_files,
+        file_output_path,
+        index_depth,
+        global_offset,
     )
 
     write_opencosmo_header(
@@ -83,12 +90,29 @@ def process_slice(slice, step_data, index_depth, simulation):
     if scratch_path is not None:
         shutil.copy(file_output_path, output_path)
         file_output_path.unlink()
-        all_files = core_files.extend(synth_core_files or [])
+        all_files = core_files + synth_core_files or []
         for file in all_files:
             assert file.is_relative_to(scratch_path)
             file.unlink()
 
     logger.success(f"Successfully wrote data for slice {slice}")
+
+
+def get_columns_in_group(group: h5py.Group, verify_length=True):
+    columns = {}
+
+    for name, child in group.items():
+        if isinstance(child, h5py.Dataset):
+            columns[name] = child
+        elif "unlensed" not in name:
+            raise ValueError("Can only handle unlensed groups as children of data")
+        else:
+            for name_, grandchild in child.items():
+                columns[f"{name_}_unlensed"] = grandchild
+    lengths = set(len(col) for col in columns.values())
+    if not len(lengths) == 1:
+        raise ValueError("All columns in a single group must be the same length!")
+    return columns
 
 
 def verify_column_consistency(files: list[Path]):
@@ -99,24 +123,18 @@ def verify_column_consistency(files: list[Path]):
     """
 
     with h5py.File(files[0]) as reference:
-        reference_shapes = {
-            colname: col.shape[1:] for colname, col in reference["data"].items()
-        }
-        reference_dtypes = {
-            colname: col.dtype for colname, col in reference["data"].items()
-        }
-        reference_attrs = {
-            colname: dict(col.attrs) for colname, col in reference["data"].items()
-        }
+        columns = get_columns_in_group(reference["data"])
+
+        reference_shapes = {colname: col.shape[1:] for colname, col in columns.items()}
+        reference_dtypes = {colname: col.dtype for colname, col in columns.items()}
+        reference_attrs = {colname: dict(col.attrs) for colname, col in columns.items()}
+
     for file_path in files[1:]:
         with h5py.File(file_path) as to_compare:
-            shapes = {
-                colname: col.shape[1:] for colname, col in to_compare["data"].items()
-            }
-            dtypes = {colname: col.dtype for colname, col in to_compare["data"].items()}
-            attrs = {
-                colname: dict(col.attrs) for colname, col in to_compare["data"].items()
-            }
+            columns = get_columns_in_group(to_compare["data"])
+            shapes = {colname: col.shape[1:] for colname, col in columns.items()}
+            dtypes = {colname: col.dtype for colname, col in columns.items()}
+            attrs = {colname: dict(col.attrs) for colname, col in columns.items()}
             if set(shapes.keys()) != set(reference_shapes.keys()):
                 logger.critical("Files do not all have the same columns!")
                 sys.exit(1)
@@ -139,7 +157,9 @@ def verify_column_consistency(files: list[Path]):
     logger.success("Columns are consistent across files!")
 
 
-def write_files(slice, core_files, synth_core_files, output_path, max_level):
+def write_files(
+    slice, core_files, synth_core_files, output_path, max_level, global_offset
+):
     counts = {}
 
     counts[FileType.CORE] = {f: get_counts(max_level, f) for f in core_files}
@@ -159,7 +179,7 @@ def write_files(slice, core_files, synth_core_files, output_path, max_level):
 
     allocate_file(output_path, files, file_map)
     with h5py.File(output_path, "a") as target:
-        write_single_file(max_level, files, target, file_map)
+        write_single_file(max_level, files, target, file_map, global_offset)
         pixels_with_data = write_indices(target, counts, max_level)
         if FileType.SYNTH_CORE in files and len(files) > 1:
             if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
@@ -220,32 +240,60 @@ def write_index(output_group, counts, max_level):
     return pixels_with_data
 
 
-def write_single_file(max_level, source_files, file_target, file_map):
+def write_single_file(max_level, source_files, file_target, file_map, global_offset):
     if len(source_files) == 1:
         file_type = next(iter(source_files.keys()))
         sources = [h5py.File(s) for s in source_files[file_type]]
-        for column_name in sources[0]["data"].keys():
-            write_column(file_target["data"], sources, column_name, file_map[file_type])
+        known_columns = [
+            get_columns_in_group(sf["data"], verify_length=False) for sf in source_files
+        ]
+        for column_name in known_columns[0].keys():
+            column_sources = [kc[column_name] for kc in known_columns]
+            write_column(
+                file_target["data"], column_sources, column_name, file_map[file_type]
+            )
+        file_target["data"]["gal_id"][:] = global_offset + np.arange(
+            0, len(file_target["data"]["gal_id"])
+        )
+
         return
+
+    local_offset = 0
     for file_type, file_type_sources in source_files.items():
         sources = [h5py.File(s) for s in source_files[file_type]]
-        for column_name in sources[0]["data"].keys():
+        known_columns = [
+            get_columns_in_group(sf["data"], verify_length=False) for sf in sources
+        ]
+        dataset_group = file_target[f"{file_type.value}/data"]
+
+        for column_name in known_columns[0].keys():
+            column_sources = [kc[column_name] for kc in known_columns]
             write_column(
-                file_target[f"{file_type.value}/data"],
-                sources,
+                dataset_group,
+                column_sources,
                 column_name,
                 file_map[file_type],
             )
+        dataset_length = len(dataset_group["gal_id"])
+        ids = global_offset + local_offset + np.arange(dataset_length)
+        print(ids)
+
+        dataset_group["gal_id"][:] = ids
+        print(dataset_group["gal_id"])
+
+        local_offset += dataset_length
 
 
 def write_column(output_data_group, sources, column_name, full_map):
-    data = np.concat([source["data"][column_name][:] for source in sources])
-    attributes = dict(sources[0]["data"][column_name].attrs)
+    data = np.concat([source[:] for source in sources])
+    attributes = dict(sources[0].attrs)
     if column_name in COLUMNS_TO_SKIP:
         return
+    if column_name in UNIT_MAP:
+        attributes["unit"] = str(UNIT_MAP[column_name])
 
     output_column_name = COLUMN_RENAMES.get(column_name, column_name)
-    if attributes["unit"] != "":
+    if attributes.get("unit", "") != "":
         unit = u.Unit(attributes["unit"])
 
         try:
@@ -272,9 +320,12 @@ def allocate_dataset_group(group, source_files, total_length):
     shapes = {}
     dtypes = {}
     with h5py.File(column_metadata_source) as source_f:
-        for colname, col in source_f["data"].items():
+        columns = get_columns_in_group(source_f["data"], verify_length=False)
+        for colname, col in columns.items():
             shapes[colname] = col.shape[1:]
             dtypes[colname] = col.dtype
+    dtypes["gal_id"] = np.int64
+    shapes["gal_id"] = ()
 
     for col, dtype in dtypes.items():
         if col in COLUMNS_TO_SKIP:
