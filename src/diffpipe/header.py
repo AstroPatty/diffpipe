@@ -6,7 +6,7 @@ from typing import Iterable
 import h5py
 import numpy as np
 from loguru import logger
-from opencosmo.spatial.models import HealPixRegionModel
+from opencosmo.spatial.models import HealpixRegionModel
 
 from diffpipe import BadInputError
 
@@ -137,7 +137,7 @@ def write_opencosmo_header(
         "unit_convention": "comoving",
         "origin": "HACC",
     }
-    region_model = HealPixRegionModel(
+    region_model = HealpixRegionModel(
         pixels=pixels_with_data, nside=2**index_depth
     ).model_dump()
     # for key, value in region_model.items():
