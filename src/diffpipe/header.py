@@ -6,7 +6,11 @@ from typing import Iterable
 import h5py
 import numpy as np
 from loguru import logger
-from opencosmo.spatial.models import HealpixRegionModel
+
+try:
+    from opencosmo.spatial.models import HealpixRegionModel
+except ImportError:
+    from opencosmo.spatial.models import HealPixRegionModel as HealpixRegionModel
 
 from diffpipe import BadInputError
 
@@ -19,12 +23,14 @@ STEPS = {
 }
 
 
-EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent across files
-    "metadata",
-    "metadata/cosmology",
-    "metadata/nbody_info",
-    "metadata/software_version_info",
-]
+EXPECTED_METDATA_ATTRIBUTE_GROUPS = (
+    [  # We will verify these are consistent across files
+        "metadata",
+        "metadata/cosmology",
+        "metadata/nbody_info",
+        "metadata/software_version_info",
+    ]
+)
 
 ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 
