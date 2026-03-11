@@ -23,14 +23,12 @@ STEPS = {
 }
 
 
-EXPECTED_METDATA_ATTRIBUTE_GROUPS = (
-    [  # We will verify these are consistent across files
-        "metadata",
-        "metadata/cosmology",
-        "metadata/nbody_info",
-        "metadata/software_version_info",
-    ]
-)
+EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent across files
+    "metadata",
+    "metadata/cosmology",
+    "metadata/nbody_info",
+    "metadata/software_version_info",
+]
 
 ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 
@@ -168,5 +166,5 @@ def write_opencosmo_header(
         lightcone_group = f_output.require_group("header/lightcone")
         lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]
         f_output["header"]["catalog_info"].create_dataset(
-            "z_phot_table", data=z_phot_table
+            "zphot_table", data=z_phot_table
         )
