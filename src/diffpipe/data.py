@@ -265,7 +265,7 @@ def write_single_file(max_level, source_files, file_target, file_map, global_off
         file_type = next(iter(source_files.keys()))
         sources = [h5py.File(s) for s in source_files[file_type]]
         known_columns = [
-            get_columns_in_group(sf["data"], verify_length=False) for sf in source_files
+            get_columns_in_group(sf["data"], verify_length=False) for sf in sources
         ]
         for column_name in known_columns[0].keys():
             column_sources = [kc[column_name] for kc in known_columns]
