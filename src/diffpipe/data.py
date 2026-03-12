@@ -93,7 +93,7 @@ def process_slice(slice, step_data, index_depth, simulation):
     if scratch_path is not None:
         shutil.copy(file_output_path, output_path)
         file_output_path.unlink()
-        all_files = core_files + synth_core_files or []
+        all_files = core_files + (synth_core_files or [])
         for file in all_files:
             assert file.is_relative_to(scratch_path)
             file.unlink()
