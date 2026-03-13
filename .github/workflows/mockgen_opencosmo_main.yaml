@@ -121,7 +121,7 @@ jobs:
         run: |
           python diffsky/scripts/LJ_LC_MOCKS/create_dummy_mock_data.py ci_test_output/dummy_version_name
 
-      - name: OpenCosmo toolkit data conversion
+      - name: OpenCosmo toolkit data conversion (with synthetic halos)
         shell: bash -l {0}
         run: |
           mkdir -p ci_test_output/oc_dummy_version_name
@@ -129,11 +129,14 @@ jobs:
           rm -rf ci_test_output/oc_dummy_version_name/lc_cores*.hdf5
           diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name -n 2
 
-      - name: Run tests on OpenCosmo-formatted data
+      - name: OpenCosmo toolkit data conversion (no synthetic halos)
         shell: bash -l {0}
         run: |
-          echo "ci_test_output/oc_dummy_version_name ready for testing"
-          # Here we can execute a testing script of ci_test_output/oc_dummy_version_name
+          mkdir -p ci_test_output/oc_dummy_version_name_no_synthetics
+          cp ci_test_output/dummy_version_name/* ci_test_output/oc_dummy_version_name_no_synthetics/
+          rm -rf ci_test_output/oc_dummy_version_name_no_synthetics/lc_cores*.hdf5
+          rm -rf ci_test_output/dummy_version_name/lc_cores-*.synthetic_halos.hdf5
+          diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name_no_synthetics -n 2
 
       - name: remove cosmos_fit mock
         shell: bash -l {0}
