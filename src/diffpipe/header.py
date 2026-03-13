@@ -23,12 +23,14 @@ STEPS = {
 }
 
 
-EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent across files
-    "metadata",
-    "metadata/cosmology",
-    "metadata/nbody_info",
-    "metadata/software_version_info",
-]
+EXPECTED_METDATA_ATTRIBUTE_GROUPS = (
+    [  # We will verify these are consistent across files
+        "metadata",
+        "metadata/cosmology",
+        "metadata/nbody_info",
+        "metadata/software_version_info",
+    ]
+)
 
 ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 
@@ -141,9 +143,7 @@ def write_opencosmo_header(
         "unit_convention": "comoving",
         "origin": "HACC",
     }
-    region_model = HealpixRegionModel(
-        pixels=pixels_with_data, nside=2**index_depth
-    ).model_dump()
+    HealpixRegionModel(pixels=pixels_with_data, nside=2**index_depth).model_dump()
     # for key, value in region_model.items():
     #    FILE_PARS[f"region_{key}"] = value
     all_steps = np.fromiter(all_steps, dtype=int)
