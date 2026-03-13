@@ -41,7 +41,6 @@ jobs:
 
         run: |
           conda config --set always_yes yes
-          python -m pip install .
           conda install --quiet \
             pip \
             setuptools \
@@ -70,6 +69,7 @@ jobs:
           pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/diffsky.git
 
           pip install git+https://github.com/ArgonneCPAC/opencosmo.git
+          python -m pip install .
 
 
       - name: download dsps data
