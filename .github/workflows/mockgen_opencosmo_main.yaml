@@ -75,21 +75,26 @@ jobs:
       - name: download dsps data
         shell: bash -l {0}
         run: |
+          WGET_OPTS="-4 --tries=3 --timeout=30 --waitretry=5 --retry-connrefused"
+
           # Create data directory
           mkdir -p dsps_drn/filters
 
           # Download data
           cd dsps_drn
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/fsps_v0.4.7_mist_c3k_a_kroupa_wNE_logGasU-2.0_logGasZ0.0.sparse.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/fsps_v0.4.7_mist_c3k_a_kroupa_wNE_logGasU-2.0_logGasZ0.0.sparse.h5
           cd filters
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_u_transmission.h5
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_g_transmission.h5
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_r_transmission.h5
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_i_transmission.h5
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_z_transmission.h5
-          wget https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_y_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_u_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_g_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_r_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_i_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_z_transmission.h5
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_y_transmission.h5
           cd ..
           cd ..
+
+          # download lc_cores-decomposition.txt
+          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/diffsky_data/LastJourney/lc_cores-decomposition.txt
 
           # Set environment variable
           export DSPS_DRN="${GITHUB_WORKSPACE}/dsps_drn"
@@ -106,6 +111,8 @@ jobs:
           # Run mock production script
           mpiexec -n 1 python diffsky/scripts/LJ_LC_MOCKS/make_lj_mock.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
 
+          mv lc_cores-decomposition.txt ci_test_output/dummy_version_name/
+
       - name: verify script completed
         shell: bash -l {0}
         run: |
@@ -114,7 +121,7 @@ jobs:
       - name: validate mock
         shell: bash -l {0}
         run: |
-          python diffsky/scripts/LJ_LC_MOCKS/inspect_lc_mock.py ci_test_output/dummy_version_name
+          python diffsky/scripts/LJ_LC_MOCKS/inspect_lc_mock.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
 
       - name: Create dummy diffsky galaxies for OpenCosmo
         shell: bash -l {0}
