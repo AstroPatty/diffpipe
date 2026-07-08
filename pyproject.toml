@@ -3,7 +3,7 @@ name = "diffpipe"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "astropy>=7.1.0",
     "astropy-healpix>=1.1.2",
@@ -12,9 +12,8 @@ dependencies = [
     "healpix>=2024.2",
     "healpy>=1.18.1",
     "loguru>=0.7.3",
-    "numba>=0.62.1",
     "numpy>=2.3.1",
-    "opencosmo>=0.9.6",
+    "opencosmo>=1.3.0",
     "tqdm>=4.67.1",
 ]
 
