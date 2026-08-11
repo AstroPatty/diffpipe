@@ -325,7 +325,7 @@ def write_column(output_data_group, sources, column_name, full_map):
             h_power = 0
 
         if h_power != 0:
-            data = data / LITTLE_H**h_power
+            data = data * LITTLE_H**h_power
             unit = unit / cu.littleh**h_power
             attributes["unit"] = str(unit)
 
