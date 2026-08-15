@@ -110,6 +110,41 @@ def test_data_consistency(input_files, output_files):
         _verify_all_columns(dataset, diffsky_files, mapping)
 
 
+def test_top_host_idx_consistency(input_files, output_files):
+    """``top_host_idx`` points at another row (an object's "top host").
+
+    It is the one column that is not copied verbatim (see ``KNOWN_TRANSFORMED``):
+    the pipeline reindexes it to the reordered rows. Rather than compare values
+    directly, verify the pointer still references the same physical object after
+    conversion. Given the row mapping (``opencosmo_row[i] == diffsky_row[m[i]]``),
+    a correctly reindexed pointer satisfies ``m[opencosmo_ptr] == diffsky_ptr[m]``.
+    """
+    input_files_by_step = _partition_by_step(input_files)
+    output_files_by_step = _partition_by_step(output_files)
+    if not set(input_files_by_step.keys()) == set(output_files_by_step.keys()):
+        raise ValueError("diffsky and opencosmo data don't have the same steps!")
+
+    for step, opencosmo_files in output_files_by_step.items():
+        assert len(opencosmo_files) == 1
+        diffsky_files = input_files_by_step[step]
+        dataset = oc.open(opencosmo_files[0], synth_cores=True)
+        mapping = _get_mapping(dataset, diffsky_files)
+
+        # opencosmo numbers top_host_idx as a global row index into the combined
+        # catalog, while each diffsky file numbers its rows from zero. Shift the
+        # per-file diffsky indices by each file's start offset so both sides
+        # reference the same concatenated row space that ``mapping`` was built on.
+        diffsky_ptr = _read_diffsky_index(diffsky_files, "top_host_idx")
+
+        opencosmo_ptr = _read_opencosmo_column(dataset, "top_host_idx")
+        if isinstance(opencosmo_ptr, dict):
+            opencosmo_ptr = opencosmo_ptr["top_host_idx"]
+
+        assert np.array_equal(mapping[opencosmo_ptr], diffsky_ptr[mapping]), (
+            f"top_host_idx is not consistent under the row mapping for step {step}"
+        )
+
+
 def _read_diffsky_column(diffsky_files, column_name):
     """Concatenate a single column across the diffsky input files."""
     chunks = []
@@ -119,14 +154,27 @@ def _read_diffsky_column(diffsky_files, column_name):
     return np.concatenate(chunks)
 
 
+def _read_diffsky_index(diffsky_files, column_name):
+    """Concatenate a group-local row-index column across the diffsky files.
+
+    Each file numbers its rows from zero, so add every file's start offset to
+    turn the values into indices into the concatenated rows.
+    """
+    chunks = []
+    offset = 0
+    for file in diffsky_files:
+        with h5py.File(file) as f:
+            values = f["data"][column_name][:]
+        chunks.append(values + offset)
+        offset += len(values)
+    return np.concatenate(chunks)
+
+
 def _read_opencosmo_column(dataset, column_name):
     """Read a single column from the opencosmo dataset as a numpy array."""
-    data = dataset.select(column_name).get_data("numpy")
+    return dataset.select(column_name).get_data("numpy")
     # A single-column select usually returns a bare ndarray, but some columns
     # come back as a mapping keyed by the column name.
-    if isinstance(data, dict):
-        return data[column_name]
-    return data
 
 
 def _verify_all_columns(opencosmo_dataset, diffsky_files, mapping):
@@ -185,6 +233,7 @@ def _get_mapping(dataset, diffsky_files):
 
     mapping = np.empty(len(opencosmo_coordinates), dtype=int)
     mapping[ia] = ib
+    assert len(np.unique(mapping)) == len(mapping)
     assert np.all(opencosmo_coordinates == diffsky_coordinates[mapping])
     return mapping
 

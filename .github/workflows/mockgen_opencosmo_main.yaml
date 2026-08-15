@@ -194,7 +194,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest h5py numpy
+          python -m pip install pytest h5py numpy opencosmo
 
       - name: Run property test suite
         env:
