@@ -27,10 +27,7 @@ def data_dir() -> Path:
     """Root directory containing the ``input`` and ``output`` catalogs."""
     raw = os.environ.get(ENV_VAR)
     if not raw:
-        pytest.skip(
-            f"{ENV_VAR} is not set; skipping tests that require converted "
-            "catalog data."
-        )
+        raw = Path(__file__).parent / "test_data"
     path = Path(raw)
     if not path.is_dir():
         pytest.fail(f"{ENV_VAR}={raw!r} does not point to an existing directory.")
@@ -52,10 +49,10 @@ def output_dir(data_dir: Path) -> Path:
 @pytest.fixture(scope="session")
 def input_files(input_dir: Path) -> list[Path]:
     """Sorted list of HDF5 files in the input catalog."""
-    return sorted(input_dir.glob("*.hdf5"))
+    return sorted(input_dir.glob("lc_cores*.hdf5"))
 
 
 @pytest.fixture(scope="session")
 def output_files(output_dir: Path) -> list[Path]:
     """Sorted list of HDF5 files in the output catalog."""
-    return sorted(output_dir.glob("*.hdf5"))
+    return sorted(output_dir.glob("lc_cores*.hdf5"))
