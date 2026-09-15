@@ -70,9 +70,8 @@ jobs:
 
           pip install git+https://github.com/ArgonneCPAC/opencosmo.git
           python -m pip install .
-
-
       - name: download dsps data
+        timeout-minutes: 5
         shell: bash -l {0}
         run: |
           WGET_OPTS="-4 --tries=3 --timeout=30 --waitretry=5 --retry-connrefused"
@@ -82,19 +81,20 @@ jobs:
 
           # Download data
           cd dsps_drn
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/fsps_v0.4.7_mist_c3k_a_kroupa_wNE_logGasU-2.0_logGasZ0.0.sparse.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/ssp-data-v1/fsps_v0.4.7_mist_c3k_a_kroupa_wNE_logGasU-2.0_logGasZ0.0.sparse.h5
+
           cd filters
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_u_transmission.h5
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_g_transmission.h5
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_r_transmission.h5
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_i_transmission.h5
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_z_transmission.h5
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/DSPS_data/filters/lsst_y_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_u_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_g_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_r_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_i_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_z_transmission.h5
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/filters-v1/lsst_y_transmission.h5
           cd ..
           cd ..
 
           # download lc_cores-decomposition.txt
-          wget $WGET_OPTS https://portal.nersc.gov/project/hacc/aphearin/diffsky_data/LastJourney/lc_cores-decomposition.txt
+          wget $WGET_OPTS https://github.com/ArgonneCPAC/diffsky-data/releases/download/hacc-data-lastjourney-v1/lc_cores-decomposition.txt
 
           # Set environment variable
           export DSPS_DRN="${GITHUB_WORKSPACE}/dsps_drn"
@@ -136,6 +136,23 @@ jobs:
           rm -rf ci_test_output/oc_dummy_version_name/lc_cores*.hdf5
           diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name -n 2
 
+      # Emit both schemas as artifacts *before* the no-synthetics step below
+      # mutates the input catalog, so the property test suite receives a
+      # complete, matched input/output pair.
+      - name: Upload diffsky input catalog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: diffsky-input-catalog
+          path: ci_test_output/dummy_version_name
+          if-no-files-found: error
+
+      - name: Upload OpenCosmo output catalog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencosmo-output-catalog
+          path: ci_test_output/oc_dummy_version_name
+          if-no-files-found: error
+
       - name: OpenCosmo toolkit data conversion (no synthetic halos)
         shell: bash -l {0}
         run: |
@@ -145,13 +162,43 @@ jobs:
           rm -rf ci_test_output/dummy_version_name/lc_cores-*.synthetic_halos.hdf5
           diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name_no_synthetics -n 2
 
-      - name: remove cosmos_fit mock
-        shell: bash -l {0}
-        run: |
-          rm -rf ci_test_output
-
       - name: Clean up mock data
         shell: bash -l {0}
         run: |
           rm -rf ci_test_output
+
+  property-tests:
+    name: pytest property test suite
+    needs: mock-generation
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download diffsky input catalog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: diffsky-input-catalog
+          path: test-data/input
+
+      - name: Download OpenCosmo output catalog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opencosmo-output-catalog
+          path: test-data/output
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest h5py numpy opencosmo
+
+      - name: Run property test suite
+        env:
+          DIFFPIPE_TEST_DATA_DIR: ${{ github.workspace }}/test-data
+        run: |
+          pytest tests -v
 
