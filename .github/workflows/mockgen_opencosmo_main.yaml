@@ -140,14 +140,14 @@ jobs:
       # mutates the input catalog, so the property test suite receives a
       # complete, matched input/output pair.
       - name: Upload diffsky input catalog artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diffsky-input-catalog
           path: ci_test_output/dummy_version_name
           if-no-files-found: error
 
       - name: Upload OpenCosmo output catalog artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: opencosmo-output-catalog
           path: ci_test_output/oc_dummy_version_name
@@ -175,18 +175,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Download diffsky input catalog artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: diffsky-input-catalog
           path: test-data/input
 
       - name: Download OpenCosmo output catalog artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: opencosmo-output-catalog
           path: test-data/output
