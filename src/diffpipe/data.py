@@ -1,7 +1,7 @@
-import shutil
 import sys
+from contextlib import ExitStack
+from itertools import chain
 from pathlib import Path
-from typing import Optional
 
 import astropy.units as u
 import h5py
@@ -32,88 +32,75 @@ COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
 
+# In-memory output files grow in steps of this size. HDF5's 64 KiB default would
+# mean reallocating (and copying) a multi-GB image thousands of times
+OUTPUT_BLOCK_SIZE = 64 * 1024**2
 
-def process_slice(slice, step_data, index_depth, simulation):
+
+def open_input(path: Path, in_memory: bool) -> h5py.File:
+    if in_memory:
+        # Read the whole file with one sequential read, rather than one small read
+        # per chunk and metadata block
+        return h5py.File(path, "r", driver="core", backing_store=False)
+    return h5py.File(path, "r")
+
+
+def open_output(path: Path, in_memory: bool) -> h5py.File:
+    if in_memory:
+        # Build the file in memory, and write it with one sequential write on close.
+        # Calling flush() on this file writes out the entire image, so don't.
+        return h5py.File(
+            path, "w", driver="core", backing_store=True, block_size=OUTPUT_BLOCK_SIZE
+        )
+    return h5py.File(path, "w")
+
+
+def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
     logger.info(f"Working on slice {slice}")
-    core_files = step_data[FileType.CORE]  # required
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
     global_offset = step_data["global_offset"]
-    scratch_path: Optional[Path] = step_data.get("scratch_path")
-    synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
+    files = {FileType.CORE: step_data[FileType.CORE]}  # required
+    if FileType.SYNTH_CORE in step_data:  # optional
+        files[FileType.SYNTH_CORE] = step_data[FileType.SYNTH_CORE]
 
-    if scratch_path is not None:
-        is_in_scratch = [f.is_relative_to(scratch_path) for f in core_files]
-        if synth_core_files is not None:
-            is_in_scratch.extend(
-                f.is_relative_to(scratch_path) for f in synth_core_files
-            )
+    # Each file is opened exactly once. The output is closed (and so, when in memory,
+    # written out) before the inputs.
+    with ExitStack() as stack:
+        sources = {
+            file_type: [stack.enter_context(open_input(p, in_memory)) for p in paths]
+            for file_type, paths in files.items()
+        }
+        target = stack.enter_context(open_output(output_path, in_memory))
 
-        scratch_output = scratch_path / "output"
-        scratch_output.mkdir(parents=False, exist_ok=True)
-        file_output_path = scratch_output / output_path.name
+        pixels_with_data = write_files(sources, target, index_depth, global_offset)
+        z_phot_table = get_z_phot_tables(sources)
 
-        if not any(is_in_scratch):
-            logger.info(f"Copying data for slice {slice} to scratch at {scratch_path}")
-            for file in core_files:
-                shutil.copy(file, scratch_path)
-            core_files = [scratch_path / f.name for f in core_files]
-            if synth_core_files is not None:
-                for file in synth_core_files:
-                    shutil.copy(file, scratch_path)
-                synth_core_files = [scratch_path / f.name for f in synth_core_files]
-        elif not all(is_in_scratch):
-            raise ValueError(
-                "Found a mixture of slices both in and out of scratch... Aborting!"
-            )
-
-    else:
-        file_output_path = output_path
-
-    pixels_with_data = write_files(
-        slice,
-        core_files,
-        synth_core_files,
-        file_output_path,
-        index_depth,
-        global_offset,
-    )
-    z_phot_table = get_z_phot_tables(step_data)
-
-    write_opencosmo_header(
-        core_files[0],
-        file_output_path,
-        simulation,
-        slice,
-        all_slices,
-        pixels_with_data,
-        index_depth,
-        z_phot_table,
-    )
-    if scratch_path is not None:
-        shutil.copy(file_output_path, output_path)
-        file_output_path.unlink()
-        all_files = core_files + (synth_core_files or [])
-        for file in all_files:
-            assert file.is_relative_to(scratch_path)
-            file.unlink()
+        write_opencosmo_header(
+            sources[FileType.CORE][0],
+            target,
+            simulation,
+            slice,
+            all_slices,
+            pixels_with_data,
+            index_depth,
+            z_phot_table,
+        )
 
     logger.success(f"Successfully wrote data for slice {slice}")
 
 
-def get_z_phot_tables(slice_files):
+def get_z_phot_tables(sources):
     z_range = (np.inf, -np.inf)
     n = 0
-    files = slice_files[FileType.CORE] + slice_files.get(FileType.SYNTH_CORE, [])
-    for file in files:
-        with h5py.File(file) as f:
-            z_phot_table = f["metadata"]["z_phot_table"][:]
-            if z_phot_table.min() < z_range[0]:
-                z_range = (z_phot_table.min(), z_range[1])
-            if z_phot_table.max() > z_range[1]:
-                z_range = (z_range[0], z_phot_table.max())
-            if len(z_phot_table) > n:
-                n = len(z_phot_table)
+    for f in chain.from_iterable(sources.values()):
+        z_phot_table = f["metadata"]["z_phot_table"][:]
+        if z_phot_table.min() < z_range[0]:
+            z_range = (z_phot_table.min(), z_range[1])
+        if z_phot_table.max() > z_range[1]:
+            z_range = (z_range[0], z_phot_table.max())
+        if len(z_phot_table) > n:
+            n = len(z_phot_table)
 
     return np.linspace(*z_range, n)
 
@@ -177,43 +164,27 @@ def verify_column_consistency(files: list[Path]):
     logger.success("Columns are consistent across files!")
 
 
-def write_files(
-    slice, core_files, synth_core_files, output_path, max_level, global_offset
-):
+def write_files(sources, target, max_level, global_offset):
     counts = {}
-
-    counts[FileType.CORE] = {f: get_counts(max_level, f) for f in core_files}
     file_map = {}
-    file_map[FileType.CORE] = make_combined_file_map(max_level, core_files)
-    if synth_core_files is not None:
-        counts[FileType.SYNTH_CORE] = {
-            f: get_counts(max_level, f) for f in synth_core_files
-        }
-        file_map[FileType.SYNTH_CORE] = make_combined_file_map(
-            max_level, synth_core_files
-        )
+    for file_type, file_type_sources in sources.items():
+        counts[file_type] = {f: get_counts(max_level, f) for f in file_type_sources}
+        file_map[file_type] = make_combined_file_map(max_level, file_type_sources)
 
-    files = {FileType.CORE: core_files}
-    if synth_core_files is not None:
-        files[FileType.SYNTH_CORE] = synth_core_files
+    allocate_file(target, sources, file_map)
+    write_single_file(sources, target, file_map, global_offset)
+    pixels_with_data = write_indices(target, counts, max_level)
+    if FileType.SYNTH_CORE in sources and len(sources) > 1:
+        if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
+        if_group.attrs["synth_cores"] = True
 
-    allocate_file(output_path, files, file_map)
-    with h5py.File(output_path, "a") as target:
-        write_single_file(max_level, files, target, file_map, global_offset)
-        pixels_with_data = write_indices(target, counts, max_level)
-        if FileType.SYNTH_CORE in files and len(files) > 1:
-            if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
-            if_group.attrs["synth_cores"] = True
-
-    target.close()
-    with h5py.File(output_path) as target:
-        if len(files) > 1:
-            for group_name, group in target.items():
-                if group_name == "header":
-                    continue
-                verify_index(group, max_level)
-        else:
-            verify_index(target, max_level)
+    if len(sources) > 1:
+        for group_name, group in target.items():
+            if group_name == "header":
+                continue
+            verify_index(group, max_level)
+    else:
+        verify_index(target, max_level)
     return pixels_with_data
 
 
@@ -260,10 +231,10 @@ def write_index(output_group, counts, max_level):
     return pixels_with_data
 
 
-def write_single_file(max_level, source_files, file_target, file_map, global_offset):
+def write_single_file(source_files, file_target, file_map, global_offset):
     if len(source_files) == 1:
         file_type = next(iter(source_files.keys()))
-        sources = [h5py.File(s) for s in source_files[file_type]]
+        sources = source_files[file_type]
         known_columns = [
             get_columns_in_group(sf["data"], verify_length=False) for sf in sources
         ]
@@ -279,8 +250,7 @@ def write_single_file(max_level, source_files, file_target, file_map, global_off
         return
 
     local_offset = 0
-    for file_type, file_type_sources in source_files.items():
-        sources = [h5py.File(s) for s in source_files[file_type]]
+    for file_type, sources in source_files.items():
         known_columns = [
             get_columns_in_group(sf["data"], verify_length=False) for sf in sources
         ]
@@ -332,19 +302,16 @@ def write_column(output_data_group, sources, column_name, full_map):
     output_ds = output_data_group[output_column_name]
     output_ds[:] = data[full_map]
     output_ds.attrs.update(attributes)
-    output_data_group.file.flush()
 
 
-def allocate_dataset_group(group, source_files, total_length):
+def allocate_dataset_group(group, sources, total_length):
     data_group = group.require_group("data")
-    column_metadata_source = source_files[0]
     shapes = {}
     dtypes = {}
-    with h5py.File(column_metadata_source) as source_f:
-        columns = get_columns_in_group(source_f["data"], verify_length=False)
-        for colname, col in columns.items():
-            shapes[colname] = col.shape[1:]
-            dtypes[colname] = col.dtype
+    columns = get_columns_in_group(sources[0]["data"], verify_length=False)
+    for colname, col in columns.items():
+        shapes[colname] = col.shape[1:]
+        dtypes[colname] = col.dtype
     dtypes["gal_id"] = np.int64
     shapes["gal_id"] = ()
 
@@ -359,16 +326,11 @@ def allocate_dataset_group(group, source_files, total_length):
         )
 
 
-def allocate_file(output_path, source_files, file_map):
-    with h5py.File(output_path, "w") as f_output:
-        if len(file_map) == 1:
-            file_type = next(iter(file_map.keys()))
-            allocate_dataset_group(
-                f_output, source_files[file_type], len(file_map[file_type])
-            )
-        else:
-            for file_type, file_type_map in file_map.items():
-                group = f_output.require_group(file_type.value)
-                allocate_dataset_group(
-                    group, source_files[file_type], len(file_type_map)
-                )
+def allocate_file(f_output, sources, file_map):
+    if len(file_map) == 1:
+        file_type = next(iter(file_map.keys()))
+        allocate_dataset_group(f_output, sources[file_type], len(file_map[file_type]))
+    else:
+        for file_type, file_type_map in file_map.items():
+            group = f_output.require_group(file_type.value)
+            allocate_dataset_group(group, sources[file_type], len(file_type_map))
