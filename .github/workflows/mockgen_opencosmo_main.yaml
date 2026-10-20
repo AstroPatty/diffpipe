@@ -105,7 +105,6 @@ jobs:
           wget $WGET_OPTS -P step_453 https://github.com/ArgonneCPAC/diffsky-data/releases/download/hacc-data-lastjourney-v3/lc_cores-453.843.hdf5
           wget $WGET_OPTS -P step_464 https://github.com/ArgonneCPAC/diffsky-data/releases/download/hacc-data-lastjourney-v3/lc_cores-464.843.hdf5
           cd ../..
-
           # Set environment variable
           export DSPS_DRN="${GITHUB_WORKSPACE}/dsps_drn"
           echo "DSPS_DRN=${DSPS_DRN}" >> $GITHUB_ENV
