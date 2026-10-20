@@ -36,24 +36,40 @@ def _get_column_metadata(group: h5py.Group | h5py.File) -> dict[str, dtype]:
     return dtypes, attrs
 
 
-def _verify_consistency(d1: dict[str, Any], d2: dict[str, Any]):
-    all_known_keys = set(d1.keys()).intersection(d2.keys())
-    for key in all_known_keys:
-        v1 = d1.get(key)
-        v2 = d2.get(key)
-        if (v1 is None or v2 is None) and key in KNOWN_NEW:
-            continue
+def _apply_renames(d: dict[str, Any]) -> dict[str, Any]:
+    """Map input column metadata onto output column names.
+
+    The original "ra"/"dec" columns are dropped and "ra_nfw"/"dec_nfw" take
+    their names, so the output "ra" must be compared against the input "ra_nfw".
+    """
+    return {
+        KNOWN_RENAMES.get(key, key): value
+        for key, value in d.items()
+        if key not in DROPPED
+    }
+
+
+def _verify_dtypes(d1: dict[str, dtype], d2: dict[str, dtype]):
+    for key in set(d1.keys()).intersection(d2.keys()):
+        if d1[key] != d2[key]:
+            raise ValueError(
+                f"Found a dtype difference in column {key}: {d1[key]} -> {d2[key]}"
+            )
+
+
+def _verify_attrs(d1: dict[str, dict], d2: dict[str, dict]):
+    for key in set(d1.keys()).intersection(d2.keys()):
+        v1 = d1[key]
+        v2 = d2[key]
         if v1 == v2:
             continue
         _do_diff_check(key, v1, v2)
 
 
-def _do_diff_check(name: str, v1, v2):
+def _do_diff_check(name: str, v1: dict, v2: dict):
     if name not in KNOWN_DIFFS:
         raise ValueError(f"Found a difference in column {name}: {v1} -> {v2}")
-    diff = KNOWN_DIFFS.get(name)
-    if not diff:
-        return
+    diff = KNOWN_DIFFS[name]
     all_keys = set(v1.keys()).union(v2.keys())
     for key in all_keys:
         subv1 = v1.get(key)
@@ -84,16 +100,20 @@ def test_column_metadata(input_files, output_files):
     # only need to check one input file
     with h5py.File(input_files[0]) as f:
         dtypes, attrs = _get_column_metadata(f["data"])
+    dtypes = _apply_renames(dtypes)
+    attrs = _apply_renames(attrs)
 
     for ofile in output_files:
         with h5py.File(ofile) as f:
             dtypes_cores, attrs_cores = _get_column_metadata(f["cores"]["data"])
-            dtypes_synth, attrs_synth = _get_column_metadata(f["cores"]["data"])
+            dtypes_synth, attrs_synth = _get_column_metadata(
+                f["synth_cores"]["data"]
+            )
 
-        _verify_consistency(dtypes, dtypes_cores)
-        _verify_consistency(dtypes, dtypes_synth)
-        _verify_consistency(attrs, attrs_cores)
-        _verify_consistency(attrs, attrs_synth)
+        _verify_dtypes(dtypes, dtypes_cores)
+        _verify_dtypes(dtypes, dtypes_synth)
+        _verify_attrs(attrs, attrs_cores)
+        _verify_attrs(attrs, attrs_synth)
 
 
 def test_data_consistency(input_files, output_files):
