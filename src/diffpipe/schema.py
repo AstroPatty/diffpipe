@@ -8,6 +8,7 @@ once they are open for conversion. The first slice to get there writes a schema
 other slice is checked against it.
 """
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,7 @@ from loguru import logger
 from diffpipe import BadInputError
 from diffpipe.header import ALLOWED_METADATA_DIFFS, EXPECTED_METDATA_ATTRIBUTE_GROUPS
 
-SCHEMA_FILE_NAME = ".diffpipe-schema.hdf5"
+SCHEMA_FILE_NAME = ".diffpipe-schema.json"
 
 
 @dataclass
@@ -49,8 +50,7 @@ def get_columns_in_group(group: h5py.Group, verify_length=True):
 
 def read_schema(f: h5py.File) -> Schema:
     """
-    Read the schema of a catalog file. A schema file is laid out like a catalog
-    file with empty columns, so this reads those too.
+    Read the schema of a catalog file.
     """
     if (
         "data" not in f
@@ -80,14 +80,52 @@ def read_schema(f: h5py.File) -> Schema:
     )
 
 
+def encode_value(value):
+    """
+    Encode an attribute value as JSON, tagging numpy and bytes values so they
+    decode to exactly what h5py would read from a file.
+    """
+    if isinstance(value, np.ndarray):
+        return {
+            "ndarray": [encode_value(v) for v in value.ravel().tolist()],
+            "shape": value.shape,
+            "dtype": value.dtype.str,
+        }
+    if isinstance(value, np.generic):
+        return {"scalar": encode_value(value.item()), "dtype": value.dtype.str}
+    if isinstance(value, bytes):
+        return {"bytes": value.decode("latin-1")}
+    return value
+
+
+def decode_value(value):
+    if not isinstance(value, dict):
+        return value
+    if "ndarray" in value:
+        values = [decode_value(v) for v in value["ndarray"]]
+        return np.array(values, dtype=value["dtype"]).reshape(value["shape"])
+    if "scalar" in value:
+        return np.dtype(value["dtype"]).type(decode_value(value["scalar"]))
+    return value["bytes"].encode("latin-1")
+
+
+def encode_attrs(attrs: dict) -> dict:
+    return {key: encode_value(value) for key, value in attrs.items()}
+
+
+def decode_attrs(attrs: dict) -> dict:
+    return {key: decode_value(value) for key, value in attrs.items()}
+
+
 def write_schema(schema: Schema, path: Path):
-    with h5py.File(path, "w") as f:
-        data_group = f.create_group("data")
-        for name, (shape, dtype, attrs) in schema.columns.items():
-            ds = data_group.create_dataset(name, shape=(0,) + shape, dtype=dtype)
-            ds.attrs.update(attrs)
-        for group_name, attrs in schema.metadata.items():
-            f.require_group(group_name).attrs.update(attrs)
+    columns = {
+        name: {"shape": shape, "dtype": dtype.str, "attrs": encode_attrs(attrs)}
+        for name, (shape, dtype, attrs) in schema.columns.items()
+    }
+    metadata = {
+        group_name: encode_attrs(attrs) for group_name, attrs in schema.metadata.items()
+    }
+    path.write_text(json.dumps({"columns": columns, "metadata": metadata}))
 
 
 def publish_schema(schema: Schema, path: Path) -> bool:
@@ -109,8 +147,21 @@ def publish_schema(schema: Schema, path: Path) -> bool:
 
 
 def load_schema(path: Path) -> Schema:
-    with h5py.File(path, "r") as f:
-        return read_schema(f)
+    contents = json.loads(path.read_bytes())
+    return Schema(
+        columns={
+            name: (
+                tuple(col["shape"]),
+                np.dtype(col["dtype"]),
+                decode_attrs(col["attrs"]),
+            )
+            for name, col in contents["columns"].items()
+        },
+        metadata={
+            group_name: decode_attrs(attrs)
+            for group_name, attrs in contents["metadata"].items()
+        },
+    )
 
 
 def values_equal(a, b) -> bool:
@@ -174,9 +225,9 @@ def verify_slice_files(slice, files: list[h5py.File], schema_path: Path):
     the schema from these files if no other slice has yet.
     """
     schemas = {f.filename: read_schema(f) for f in files}
-    if schema_path.exists():
+    try:
         reference = load_schema(schema_path)
-    else:
+    except FileNotFoundError:
         reference = next(iter(schemas.values()))
         for filename, schema in schemas.items():
             verify_schema(reference, schema, filename)
