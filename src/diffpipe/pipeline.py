@@ -31,34 +31,77 @@ MPI_LAUNCHER_ENV_PREFIXES = ("PMI_", "PMIX_", "HYDRA_", "HYDI_")
 class Budget:
     """
     A finite resource (worker slots, bytes of RAM, bytes of scratch) that slices
-    must reserve before they start. A request larger than the whole budget is
-    granted once nothing else holds any of it, so an oversized slice can't stall
-    the run.
+    must reserve before they start. A request larger than the whole budget fits
+    once nothing else holds any of it, so an oversized slice can still run. Budgets
+    aren't locked on their own: a Scheduler guards all of them with a single lock.
     """
 
     def __init__(self, capacity: int):
         self.capacity = capacity
         self.used = 0
+
+    def fits(self, amount: int) -> bool:
+        return self.used == 0 or self.used + amount <= self.capacity
+
+
+class Scheduler:
+    """
+    Decides which slice starts next, and reserves its share of every budget.
+
+    Slices are started largest first, while there is room for them. When the
+    largest waiting slice doesn't fit, the largest one that does starts instead,
+    so memory isn't left idle while small slices wait. That could hold back a
+    large slice indefinitely, so once max_skips slices have started ahead of it,
+    no others start until it does.
+    """
+
+    def __init__(
+        self,
+        slices: list[int],
+        budgets: list[tuple[Budget, Callable[[int], int]]],
+        size: Callable[[int], int],
+        max_skips: int,
+    ):
+        self.pending = sorted(slices, key=size, reverse=True)
+        self.budgets = budgets
+        self.max_skips = max_skips
+        self.skips = 0
         self.aborted = False
         self._cond = threading.Condition()
 
-    def acquire(self, amount: int) -> bool:
-        with self._cond:
-            self._cond.wait_for(
-                lambda: (
-                    self.aborted
-                    or self.used == 0
-                    or self.used + amount <= self.capacity
-                )
-            )
-            if self.aborted:
-                return False
-            self.used += amount
-            return True
+    def _fits(self, slice) -> bool:
+        return all(budget.fits(cost(slice)) for budget, cost in self.budgets)
 
-    def release(self, amount: int):
+    def _choose(self) -> int | None:
+        if self._fits(self.pending[0]):
+            return self.pending[0]
+        if self.skips >= self.max_skips:
+            return None
+        return next((s for s in self.pending[1:] if self._fits(s)), None)
+
+    def next(self) -> int | None:
+        """
+        Wait until a slice can start, reserve its resources and return it. Returns
+        None once every slice has started, or if the run is aborted.
+        """
         with self._cond:
-            self.used -= amount
+            while True:
+                if self.aborted or not self.pending:
+                    return None
+                slice = self._choose()
+                if slice is not None:
+                    break
+                self._cond.wait()
+            self.skips = 0 if slice == self.pending[0] else self.skips + 1
+            self.pending.remove(slice)
+            for budget, cost in self.budgets:
+                budget.used += cost(slice)
+            return slice
+
+    def release(self, slice, budgets: list[tuple[Budget, Callable[[int], int]]]):
+        with self._cond:
+            for budget, cost in budgets:
+                budget.used -= cost(slice)
             self._cond.notify_all()
 
     def abort(self):
@@ -123,6 +166,8 @@ def run_slices(
 
     A slice is only started once there is a free worker, memory for it (when
     max_memory is given) and scratch space for its output (when scratch is given).
+    The Scheduler picks the order: largest first, with smaller slices filling any
+    room the largest waiting slice can't use.
     With scratch, each slice writes its output there, and it is copied to its final
     location in the background while the worker moves on to the next slice. The
     slice's scratch space is freed once the copy is done.
@@ -152,6 +197,8 @@ def run_slices(
             (Budget(scratch_space), lambda s: int(SCRATCH_OVERHEAD * sizes[s]))
         )
     budgets = while_processing + until_copied
+    # A pool's worth of smaller slices may start ahead of the largest waiting one
+    scheduler = Scheduler(slices, budgets, sizes.get, max_skips=n_procs)
     for budget, cost in budgets[1:]:
         too_big = [s for s in slices if cost(s) > budget.capacity]
         if too_big:
@@ -166,10 +213,7 @@ def run_slices(
 
     def stage_all(ex: ProcessPoolExecutor):
         try:
-            for s in slices:
-                for budget, cost in budgets:
-                    if not budget.acquire(cost(s)):
-                        return
+            while (s := scheduler.next()) is not None:
                 step_data = work_orders[s]
                 if scratch is not None:
                     step_data = output_to_scratch(s, step_data, scratch)
@@ -199,8 +243,7 @@ def run_slices(
                     raise outcome
                 outcome.result()
                 if event == "processed":
-                    for budget, cost in while_processing:
-                        budget.release(cost(s))
+                    scheduler.release(s, while_processing)
                     if scratch is not None:
                         copy = copier.submit(stage_out, s, work_orders[s], step_data)
                         copy.add_done_callback(
@@ -208,12 +251,10 @@ def run_slices(
                         )
                         continue
                 else:
-                    for budget, cost in until_copied:
-                        budget.release(cost(s))
+                    scheduler.release(s, until_copied)
                 remaining -= 1
         except BaseException:
-            for budget, _ in budgets:
-                budget.abort()
+            scheduler.abort()
             ex.shutdown(cancel_futures=True)
             raise
         stager.join()
