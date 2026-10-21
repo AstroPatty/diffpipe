@@ -71,6 +71,11 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
     if FileType.SYNTH_CORE in step_data:  # optional
         files[FileType.SYNTH_CORE] = step_data[FileType.SYNTH_CORE]
 
+    # The output is written under a temporary name, and renamed once it is complete,
+    # so a file with the final name is always a finished output (--restart relies
+    # on this).
+    partial_path = output_path.with_name(f"{output_path.name}.partial")
+
     # Each file is opened exactly once, and verified once it is open. The output is
     # closed (and so, when in memory, written out) before the inputs.
     with ExitStack() as stack:
@@ -85,7 +90,7 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
         except BadInputError as e:
             logger.critical(f"Slice {slice}: {e}")
             raise
-        target = stack.enter_context(open_output(output_path, in_memory))
+        target = stack.enter_context(open_output(partial_path, in_memory))
 
         pixels_with_data = write_files(sources, target, index_depth, id_offset)
         z_phot_table = get_z_phot_tables(sources)
@@ -101,6 +106,7 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
             z_phot_table,
         )
 
+    partial_path.replace(output_path)
     logger.success(f"Successfully wrote data for slice {slice}")
 
 
