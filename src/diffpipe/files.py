@@ -1,6 +1,8 @@
 import re
 import sys
+import time
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from enum import Enum
 from pathlib import Path
 from typing import Iterable
@@ -10,6 +12,10 @@ from loguru import logger
 
 from diffpipe.header import get_simulation_header_data
 from diffpipe.schema import SCHEMA_FILE_NAME
+
+# Files counted per task when counting rows. Each file is a few small reads, so
+# batch them to keep the cost of handing out tasks down
+COUNT_CHUNK_SIZE = 16
 
 # lc_cores-{slice}.{pixel}.diffsky_gals[.synthetic_halos].hdf5
 CATALOG_FILE_PATTERN = re.compile(
@@ -38,28 +44,47 @@ def build_work_orders(
 
     all_slices = set(files_by_slice.keys())
     output_paths = get_output_paths(output_folder, all_slices, overwrite)
-    global_offset = 0
     for slice in all_slices:
         files_by_slice[slice]["output_path"] = output_paths[slice]
         files_by_slice[slice]["all_slices"] = all_slices
         files_by_slice[slice]["schema_path"] = schema_path
 
-        total_length = get_total_length(files_by_slice[slice])
-        files_by_slice[slice]["global_offset"] = global_offset
-        global_offset += total_length
-
     return files_by_slice
 
 
-def get_total_length(files_by_slice):
-    core_files = files_by_slice[FileType.CORE]
-    synth_core_files = files_by_slice.get(FileType.SYNTH_CORE, [])
-    total = 0
-    for file in core_files + synth_core_files:
-        with h5py.File(file) as f:
-            ds = next(iter(f["data"].values()))
-            total += len(ds)
-    return total
+def assign_global_offsets(work_orders: dict, n_procs: int):
+    """
+    Give each slice the offset of its first gal_id, so ids are unique across the
+    run. This needs the length of every input file, and opening each one serially
+    can take hours on a network file system, so count them in parallel. h5py only
+    runs one HDF5 call at a time per process, so this uses processes, not threads.
+    """
+    # Assign offsets in the order of the set every slice shares, as they always have
+    # been, so ids match earlier runs
+    all_slices = next(iter(work_orders.values()))["all_slices"]
+    files = {
+        slice: work_orders[slice][FileType.CORE]
+        + work_orders[slice].get(FileType.SYNTH_CORE, [])
+        for slice in all_slices
+    }
+    all_files = [path for slice in all_slices for path in files[slice]]
+    logger.info(f"Counting rows in {len(all_files)} input files")
+    start = time.perf_counter()
+    with ProcessPoolExecutor(max_workers=n_procs) as ex:
+        lengths = dict(
+            zip(all_files, ex.map(count_rows, all_files, chunksize=COUNT_CHUNK_SIZE))
+        )
+    logger.info(f"Counted rows in {time.perf_counter() - start:.0f}s")
+
+    global_offset = 0
+    for slice in all_slices:
+        work_orders[slice]["global_offset"] = global_offset
+        global_offset += sum(lengths[path] for path in files[slice])
+
+
+def count_rows(path: Path) -> int:
+    with h5py.File(path) as f:
+        return len(next(iter(f["data"].values())))
 
 
 def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool):

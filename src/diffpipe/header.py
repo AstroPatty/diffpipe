@@ -20,14 +20,12 @@ STEPS = {
 }
 
 
-EXPECTED_METDATA_ATTRIBUTE_GROUPS = (
-    [  # We will verify these are consistent across files
-        "metadata",
-        "metadata/cosmology",
-        "metadata/nbody_info",
-        "metadata/software_version_info",
-    ]
-)
+EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent across files
+    "metadata",
+    "metadata/cosmology",
+    "metadata/nbody_info",
+    "metadata/software_version_info",
+]
 
 ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 

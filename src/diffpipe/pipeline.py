@@ -19,6 +19,9 @@ IN_MEMORY_OVERHEAD = 3.5
 SCRATCH_OVERHEAD = 2.0
 # A slice is made of many small files, so copy several at once
 COPY_THREADS = 8
+# Every input file is stat-ed to size the slices, and each stat is a round trip on a
+# network file system, so make many at once
+STAT_THREADS = 32
 # Environment variables an MPI launcher (srun, mpiexec) uses to hand a process its
 # connection to the launcher
 MPI_LAUNCHER_ENV_PREFIXES = ("PMI_", "PMIX_", "HYDRA_", "HYDI_")
@@ -126,10 +129,13 @@ def run_slices(
     slice is finished.
     """
     slices = sorted(work_orders)
-    sizes = {
-        s: sum(p.stat().st_size for p in slice_input_files(work_orders[s]))
-        for s in slices
-    }
+    with ThreadPoolExecutor(STAT_THREADS) as ex:
+        sizes = {
+            s: sum(
+                ex.map(lambda p: p.stat().st_size, slice_input_files(work_orders[s]))
+            )
+            for s in slices
+        }
 
     # (budget, cost of a slice). When staging, allow one slice beyond the number of
     # workers, so the next slice is already on scratch when a worker frees up.
@@ -176,7 +182,6 @@ def run_slices(
         except BaseException as e:
             finished.put((None, None, e))
 
-    detach_from_mpi_launcher()
     # Each slice gets a fresh worker. A reused worker holds on to the memory of the
     # slices it has already processed, which the memory budget doesn't account for.
     with ProcessPoolExecutor(max_workers=n_procs, max_tasks_per_child=1) as ex:
