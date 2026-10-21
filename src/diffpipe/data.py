@@ -33,6 +33,11 @@ COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
 
+# A galaxy's gal_id is its slice in the bits above this one, and its row within the
+# slice below. Ids are unique across slices without any slice needing the length of
+# another, and leave room for 2**40 (~1e12) rows per slice
+SLICE_ID_SHIFT = 40
+
 # In-memory output files grow in steps of this size. HDF5's 64 KiB default would
 # mean reallocating (and copying) a multi-GB image thousands of times
 OUTPUT_BLOCK_SIZE = 64 * 1024**2
@@ -60,7 +65,7 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
     logger.info(f"Working on slice {slice}")
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
-    global_offset = step_data["global_offset"]
+    id_offset = slice << SLICE_ID_SHIFT
     schema_path = step_data["schema_path"]
     files = {FileType.CORE: step_data[FileType.CORE]}  # required
     if FileType.SYNTH_CORE in step_data:  # optional
@@ -82,7 +87,7 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
             raise
         target = stack.enter_context(open_output(output_path, in_memory))
 
-        pixels_with_data = write_files(sources, target, index_depth, global_offset)
+        pixels_with_data = write_files(sources, target, index_depth, id_offset)
         z_phot_table = get_z_phot_tables(sources)
 
         write_opencosmo_header(
@@ -114,7 +119,7 @@ def get_z_phot_tables(sources):
     return np.linspace(*z_range, n)
 
 
-def write_files(sources, target, max_level, global_offset):
+def write_files(sources, target, max_level, id_offset):
     counts = {}
     file_map = {}
     for file_type, file_type_sources in sources.items():
@@ -122,7 +127,7 @@ def write_files(sources, target, max_level, global_offset):
         file_map[file_type] = make_combined_file_map(max_level, file_type_sources)
 
     allocate_file(target, sources, file_map)
-    write_single_file(sources, target, file_map, global_offset)
+    write_single_file(sources, target, file_map, id_offset)
     pixels_with_data = write_indices(target, counts, max_level)
     if FileType.SYNTH_CORE in sources and len(sources) > 1:
         if_group = target.require_group(f"{FileType.SYNTH_CORE.value}/load/if")
@@ -181,7 +186,7 @@ def write_index(output_group, counts, max_level):
     return pixels_with_data
 
 
-def write_single_file(source_files, file_target, file_map, global_offset):
+def write_single_file(source_files, file_target, file_map, id_offset):
     if len(source_files) == 1:
         file_type = next(iter(source_files.keys()))
         sources = source_files[file_type]
@@ -193,7 +198,7 @@ def write_single_file(source_files, file_target, file_map, global_offset):
             write_column(
                 file_target["data"], column_sources, column_name, file_map[file_type]
             )
-        file_target["data"]["gal_id"][:] = global_offset + np.arange(
+        file_target["data"]["gal_id"][:] = id_offset + np.arange(
             0, len(file_target["data"]["gal_id"])
         )
 
@@ -215,7 +220,7 @@ def write_single_file(source_files, file_target, file_map, global_offset):
                 file_map[file_type],
             )
         dataset_length = len(dataset_group["gal_id"])
-        ids = global_offset + local_offset + np.arange(dataset_length)
+        ids = id_offset + local_offset + np.arange(dataset_length)
 
         dataset_group["gal_id"][:] = ids
 

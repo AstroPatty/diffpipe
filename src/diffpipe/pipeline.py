@@ -182,6 +182,7 @@ def run_slices(
         except BaseException as e:
             finished.put((None, None, e))
 
+    detach_from_mpi_launcher()
     # Each slice gets a fresh worker. A reused worker holds on to the memory of the
     # slices it has already processed, which the memory budget doesn't account for.
     with ProcessPoolExecutor(max_workers=n_procs, max_tasks_per_child=1) as ex:

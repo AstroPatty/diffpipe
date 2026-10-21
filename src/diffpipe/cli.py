@@ -10,9 +10,9 @@ from loguru import logger
 
 from diffpipe import BadInputError
 from diffpipe.data import process_slice
-from diffpipe.files import assign_global_offsets, build_work_orders
+from diffpipe.files import build_work_orders
 from diffpipe.header import get_simulation_header_data
-from diffpipe.pipeline import detach_from_mpi_launcher, run_slices
+from diffpipe.pipeline import run_slices
 from diffpipe.schema import SCHEMA_FILE_NAME
 
 DATA_FOLDER = click.Path(
@@ -124,9 +124,6 @@ def run(
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
-    # Before any worker processes are started
-    detach_from_mpi_launcher()
-    assign_global_offsets(work_orders, n_procs)
 
     memory_budget = None
     if in_memory:
