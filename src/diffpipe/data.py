@@ -1,4 +1,3 @@
-import sys
 from contextlib import ExitStack
 from itertools import chain
 from pathlib import Path
@@ -11,6 +10,7 @@ import numpy as np
 from astropy.cosmology import units as cu
 from loguru import logger
 
+from diffpipe import BadInputError
 from diffpipe.files import FileType
 from diffpipe.header import write_opencosmo_header
 from diffpipe.index import (
@@ -19,6 +19,7 @@ from diffpipe.index import (
     make_combined_file_map,
     verify_index,
 )
+from diffpipe.schema import get_columns_in_group, verify_slice_files
 from diffpipe.updaters import UPDATERS
 
 COMPRESSION = hdf5plugin.Blosc2(
@@ -60,17 +61,25 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
     global_offset = step_data["global_offset"]
+    schema_path = step_data["schema_path"]
     files = {FileType.CORE: step_data[FileType.CORE]}  # required
     if FileType.SYNTH_CORE in step_data:  # optional
         files[FileType.SYNTH_CORE] = step_data[FileType.SYNTH_CORE]
 
-    # Each file is opened exactly once. The output is closed (and so, when in memory,
-    # written out) before the inputs.
+    # Each file is opened exactly once, and verified once it is open. The output is
+    # closed (and so, when in memory, written out) before the inputs.
     with ExitStack() as stack:
         sources = {
             file_type: [stack.enter_context(open_input(p, in_memory)) for p in paths]
             for file_type, paths in files.items()
         }
+        try:
+            verify_slice_files(
+                slice, list(chain.from_iterable(sources.values())), schema_path
+            )
+        except BadInputError as e:
+            logger.critical(f"Slice {slice}: {e}")
+            raise
         target = stack.enter_context(open_output(output_path, in_memory))
 
         pixels_with_data = write_files(sources, target, index_depth, global_offset)
@@ -103,65 +112,6 @@ def get_z_phot_tables(sources):
             n = len(z_phot_table)
 
     return np.linspace(*z_range, n)
-
-
-def get_columns_in_group(group: h5py.Group, verify_length=True):
-    columns = {}
-
-    for name, child in group.items():
-        if isinstance(child, h5py.Dataset):
-            columns[name] = child
-        elif "unlensed" not in name:
-            raise ValueError("Can only handle unlensed groups as children of data")
-        else:
-            for name_, grandchild in child.items():
-                columns[f"{name_}_unlensed"] = grandchild
-    lengths = set(len(col) for col in columns.values())
-    if not len(lengths) == 1:
-        raise ValueError("All columns in a single group must be the same length!")
-    return columns
-
-
-def verify_column_consistency(files: list[Path]):
-    """
-    Verify that all files have the same columns, and for each column, that:
-    1. The shapes are compatible (identical after 0th axis)
-    2. The data types are compatible
-    """
-
-    with h5py.File(files[0]) as reference:
-        columns = get_columns_in_group(reference["data"])
-
-        reference_shapes = {colname: col.shape[1:] for colname, col in columns.items()}
-        reference_dtypes = {colname: col.dtype for colname, col in columns.items()}
-        reference_attrs = {colname: dict(col.attrs) for colname, col in columns.items()}
-
-    for file_path in files[1:]:
-        with h5py.File(file_path) as to_compare:
-            columns = get_columns_in_group(to_compare["data"])
-            shapes = {colname: col.shape[1:] for colname, col in columns.items()}
-            dtypes = {colname: col.dtype for colname, col in columns.items()}
-            attrs = {colname: dict(col.attrs) for colname, col in columns.items()}
-            if set(shapes.keys()) != set(reference_shapes.keys()):
-                logger.critical("Files do not all have the same columns!")
-                sys.exit(1)
-            if shapes != reference_shapes:
-                logger.critical("Column shapes are not consistent across files!")
-                sys.exit(1)
-            if attrs != reference_attrs:
-                logger.critical("Column attributes are not consistent across files!")
-                sys.exit(1)
-
-            for name, rdtype in reference_dtypes.items():
-                target_dtype = dtypes[name]
-                promoted_type = np.promote_types(rdtype, target_dtype)
-                if promoted_type not in [rdtype, target_dtype]:
-                    # Columns may have different precision (numpy will automatically promote later)
-                    # But we are avoiding situations where we have eg. int and float
-                    logger.critical("Column dtypes are not consistent across files!")
-                    sys.exit(1)
-
-    logger.success("Columns are consistent across files!")
 
 
 def write_files(sources, target, max_level, global_offset):

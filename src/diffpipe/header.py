@@ -1,7 +1,4 @@
-import sys
 from importlib.resources import files as resource_files
-from pathlib import Path
-from typing import Iterable
 
 import h5py
 import numpy as np
@@ -48,41 +45,6 @@ def get_step_zs(simulation_name):
     )[1:]
     steps_z = 1 / steps_a - 1
     return steps_z
-
-
-def verify_incoming_metadata(file_paths: Iterable[Path]):
-    files = [h5py.File(path) for path in file_paths]
-    for group_name in EXPECTED_METDATA_ATTRIBUTE_GROUPS:
-        group_data = []
-        for file in files:
-            try:
-                data = dict(file[group_name].attrs)
-            except KeyError:
-                logger.critical(
-                    f"At least one file is missing expected metadata group {group_name}"
-                )
-                sys.exit(1)
-            group_data.append(data)
-        verify_metadata_group(group_name, group_data)
-
-
-def verify_metadata_group(group_name: str, group_data: list[dict]):
-    first = group_data[0]
-    for file_data in group_data[1:]:
-        for key, value in first.items():
-            if key not in file_data:
-                logger.critical(
-                    f"Not all files have the same metadata for group {group_name}"
-                )
-                sys.exit(1)
-            if key in ALLOWED_METADATA_DIFFS.get(group_name, []):
-                continue
-
-            if value != file_data[key]:
-                logger.critical(
-                    f"Not all files have the same metadata for entry in {group_name}/{key}"
-                )
-                sys.exit(1)
 
 
 def copy_required_header_attributes(source: h5py.File, output: h5py.File):

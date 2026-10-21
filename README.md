@@ -14,7 +14,7 @@ This tool exposes a single command line script, `diffpipe run`. See `diffpipe ru
 
 # Implemented Checks
 
-This package does extensive checking on the incoming data before performing any actual work. Currently implemented (in order of appearance):
+This package does extensive checking on the incoming data. Checks 1 and 2 only need file names, and are done before any work starts. Opening every file up front is slow on network file systems, so the remaining checks are done by each redshift slice once its files are open for conversion: the first slice to get there writes a schema (`.diffpipe-schema.hdf5` in the output folder, removed when the run ends), and every slice's files are checked against it. A slice that fails stops the run before it writes any output. Currently implemented (in order of appearance):
 
 1. If working with both cores and synthetic cores, ensure we have both types of files for every redshift slice
 2. If working with both cores and synthetic cores, check each redshift slice and ensure we have both cores and synthetic cores for every pixel included in that slice.

@@ -13,6 +13,7 @@ from diffpipe.data import process_slice
 from diffpipe.files import build_work_orders
 from diffpipe.header import get_simulation_header_data
 from diffpipe.pipeline import run_slices
+from diffpipe.schema import SCHEMA_FILE_NAME
 
 DATA_FOLDER = click.Path(
     exists=True, file_okay=False, readable=True, resolve_path=True, path_type=Path
@@ -139,7 +140,14 @@ def run(
     run_step_f = partial(
         run_step, index_depth=index_depth, simulation=simulation, in_memory=in_memory
     )
-    run_slices(work_orders, run_step_f, n_procs, scratch_path, memory_budget)
+    schema_path = output_folder / SCHEMA_FILE_NAME
+    try:
+        run_slices(work_orders, run_step_f, n_procs, scratch_path, memory_budget)
+    except BadInputError:
+        logger.critical("Terminating due to previous error")
+        sys.exit(1)
+    finally:
+        schema_path.unlink(missing_ok=True)
     if scratch_path is not None:
         scratch_path.rmdir()
 
