@@ -18,6 +18,9 @@ IN_MEMORY_OVERHEAD = 3.5
 # Scratch space a slice's output needs relative to the size of its inputs. Outputs
 # are compressed, and measured at ~0.8x on the test data, with some headroom.
 SCRATCH_OVERHEAD = 1.0
+# Smaller slices, per worker, that may start ahead of the largest waiting slice
+# before the scheduler stops starting others until it fits
+BACKFILL_PER_WORKER = 4
 # Outputs copied from scratch to their final location at once
 COPY_THREADS = 4
 # Every input file is stat-ed to size the slices, and each stat is a round trip on a
@@ -197,8 +200,12 @@ def run_slices(
             (Budget(scratch_space), lambda s: int(SCRATCH_OVERHEAD * sizes[s]))
         )
     budgets = while_processing + until_copied
-    # A pool's worth of smaller slices may start ahead of the largest waiting one
-    scheduler = Scheduler(slices, budgets, sizes.get, max_skips=n_procs)
+    # A few pools' worth of smaller slices may start ahead of the largest waiting one.
+    # Fewer drains the pool when the waiting slice would soon fit anyway, more lets
+    # a slice waiting on scratch be held back for longer.
+    scheduler = Scheduler(
+        slices, budgets, sizes.get, max_skips=BACKFILL_PER_WORKER * n_procs
+    )
     for budget, cost in budgets[1:]:
         too_big = [s for s in slices if cost(s) > budget.capacity]
         if too_big:
