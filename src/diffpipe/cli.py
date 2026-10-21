@@ -36,8 +36,9 @@ def diffpipe():
     "--scratch",
     required=False,
     type=OUTPUT_FOLDER,
-    help="Fast local storage to work in. Slices are copied here one at a time as they "
-    "are needed, and each output is copied back as soon as it is finished",
+    help="Fast local storage to write outputs to. Each output is copied to "
+    "OUTPUT_FOLDER in the background as soon as it is finished, and then removed "
+    "from scratch",
 )
 @click.option("--pre-copy", "-p", is_flag=True, hidden=True)
 @click.option(
@@ -111,8 +112,8 @@ def run(
 
     if pre_copy:
         logger.warning(
-            "--pre-copy is deprecated and has no effect. With --scratch, slices are "
-            "copied to scratch one at a time as they are needed"
+            "--pre-copy is deprecated and has no effect. Inputs are no longer copied "
+            "to scratch"
         )
 
     scratch_path = scratch
