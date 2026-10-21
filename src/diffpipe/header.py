@@ -1,7 +1,4 @@
-import sys
 from importlib.resources import files as resource_files
-from pathlib import Path
-from typing import Iterable
 
 import h5py
 import numpy as np
@@ -23,14 +20,12 @@ STEPS = {
 }
 
 
-EXPECTED_METDATA_ATTRIBUTE_GROUPS = (
-    [  # We will verify these are consistent across files
-        "metadata",
-        "metadata/cosmology",
-        "metadata/nbody_info",
-        "metadata/software_version_info",
-    ]
-)
+EXPECTED_METDATA_ATTRIBUTE_GROUPS = [  # We will verify these are consistent across files
+    "metadata",
+    "metadata/cosmology",
+    "metadata/nbody_info",
+    "metadata/software_version_info",
+]
 
 ALLOWED_METADATA_DIFFS = {"metadata": ["creation_date", "mock_version_name"]}
 
@@ -50,51 +45,10 @@ def get_step_zs(simulation_name):
     return steps_z
 
 
-def verify_incoming_metadata(file_paths: Iterable[Path]):
-    files = [h5py.File(path) for path in file_paths]
-    for group_name in EXPECTED_METDATA_ATTRIBUTE_GROUPS:
-        group_data = []
-        for file in files:
-            try:
-                data = dict(file[group_name].attrs)
-            except KeyError:
-                logger.critical(
-                    f"At least one file is missing expected metadata group {group_name}"
-                )
-                sys.exit(1)
-            group_data.append(data)
-        verify_metadata_group(group_name, group_data)
-
-
-def verify_metadata_group(group_name: str, group_data: list[dict]):
-    first = group_data[0]
-    for file_data in group_data[1:]:
-        for key, value in first.items():
-            if key not in file_data:
-                logger.critical(
-                    f"Not all files have the same metadata for group {group_name}"
-                )
-                sys.exit(1)
-            if key in ALLOWED_METADATA_DIFFS.get(group_name, []):
-                continue
-
-            if value != file_data[key]:
-                logger.critical(
-                    f"Not all files have the same metadata for entry in {group_name}/{key}"
-                )
-                sys.exit(1)
-
-
-def copy_required_header_attributes(source_file_path: Path, output_file_path: Path):
-    header_data = {}
-    with h5py.File(source_file_path) as source:
-        for input_name, output_name in METADATA_ATTRIBUTE_GROUPS_TO_COPY.items():
-            header_data[output_name] = dict(source[input_name].attrs)
-
-    with h5py.File(output_file_path, "a") as output:
-        for group_name, group_attrs in header_data.items():
-            group = output.require_group(f"header/{group_name}")
-            group.attrs.update(group_attrs)
+def copy_required_header_attributes(source: h5py.File, output: h5py.File):
+    for input_name, output_name in METADATA_ATTRIBUTE_GROUPS_TO_COPY.items():
+        group = output.require_group(f"header/{output_name}")
+        group.attrs.update(dict(source[input_name].attrs))
 
 
 def get_simulation_header_data(simulation_name: str):
@@ -122,8 +76,8 @@ def __recurse_header(source: h5py.File, group_name: str):
 
 
 def write_opencosmo_header(
-    source_file_path: Path,
-    output_file_path: Path,
+    source: h5py.File,
+    f_output: h5py.File,
     simulation_name: str,
     step: int,
     all_steps: set[int],
@@ -131,7 +85,7 @@ def write_opencosmo_header(
     index_depth: int,
     z_phot_table: np.ndarray,
 ):
-    copy_required_header_attributes(source_file_path, output_file_path)
+    copy_required_header_attributes(source, f_output)
     additional_header_data = get_simulation_header_data(simulation_name)
     simulation_steps = get_step_zs(simulation_name)
 
@@ -155,16 +109,13 @@ def write_opencosmo_header(
     except IndexError:
         redshift_low = 0.0
 
-    with h5py.File(output_file_path, "a") as f_output:
-        for group_path, group_data in additional_header_data.items():
-            group = f_output.require_group(group_path)
-            group.attrs.update(group_data)
+    for group_path, group_data in additional_header_data.items():
+        group = f_output.require_group(group_path)
+        group.attrs.update(group_data)
 
-        file_group = f_output.require_group("header/file")
-        for key, val in FILE_PARS.items():
-            file_group.attrs[key] = val
-        lightcone_group = f_output.require_group("header/lightcone")
-        lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]
-        f_output["header"]["catalog_info"].create_dataset(
-            "zphot_table", data=z_phot_table
-        )
+    file_group = f_output.require_group("header/file")
+    for key, val in FILE_PARS.items():
+        file_group.attrs[key] = val
+    lightcone_group = f_output.require_group("header/lightcone")
+    lightcone_group.attrs["z_range"] = [redshift_low, redshift_high]
+    f_output["header"]["catalog_info"].create_dataset("zphot_table", data=z_phot_table)

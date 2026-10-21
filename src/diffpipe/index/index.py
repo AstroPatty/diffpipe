@@ -17,8 +17,7 @@ def verify_index(group, max_level):
     assert np.all(np.sort(pixel_assignments) == pixel_assignments)
 
 
-def get_counts(max_level, file):
-    file = h5py.File(file)
+def get_counts(max_level, file: h5py.File):
     ra = file["data"]["ra_nfw"][:]
     dec = file["data"]["dec_nfw"][:]
     nside = 2**max_level
@@ -38,7 +37,7 @@ def combine_counts(counts):
     return totals
 
 
-def make_combined_file_map(max_level: int, files: list):
+def make_combined_file_map(max_level: int, files: list[h5py.File]):
     pixel_assignments = [get_pixels(max_level, f) for f in files]
 
     pixel_assignments = np.concat(pixel_assignments)
@@ -47,9 +46,8 @@ def make_combined_file_map(max_level: int, files: list):
     return file_maps
 
 
-def get_pixels(max_level: int, file):
-    with h5py.File(file) as f:
-        ra = f["data"]["ra_nfw"][:]
-        dec = f["data"]["dec_nfw"][:]
+def get_pixels(max_level: int, file: h5py.File):
+    ra = file["data"]["ra_nfw"][:]
+    dec = file["data"]["dec_nfw"][:]
     nside = 2**max_level
     return ang2pix(nside, ra, dec, lonlat=True, nest=True)

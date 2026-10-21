@@ -1,15 +1,19 @@
+import re
 import sys
 from collections import defaultdict
 from enum import Enum
-from itertools import chain
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
-import h5py
 from loguru import logger
 
-from diffpipe import data
-from diffpipe.header import get_simulation_header_data, verify_incoming_metadata
+from diffpipe.header import get_simulation_header_data
+from diffpipe.schema import SCHEMA_FILE_NAME
+
+# lc_cores-{slice}.{pixel}.diffsky_gals[.synthetic_halos].hdf5
+CATALOG_FILE_PATTERN = re.compile(
+    r"lc_cores-(\d+)\.(\d+)\.diffsky_gals(\.synthetic_halos)?\.hdf5"
+)
 
 
 class FileType(Enum):
@@ -20,43 +24,25 @@ class FileType(Enum):
 def build_work_orders(
     input_folder: Path,
     output_folder: Path,
-    scratch: Optional[Path],
     simulation: str,
     overwrite: bool,
 ):
     _ = get_simulation_header_data(simulation)
     files_by_slice = build_file_lists(input_folder)
-    all_files = []
-    for files in files_by_slice.values():
-        for files_by_type in files.values():
-            all_files += files_by_type
-    data.verify_column_consistency(all_files)
+
+    # The contents of the files are verified by each slice as it is converted,
+    # against a schema written by the first one. Remove any left by an earlier run.
+    schema_path = output_folder / SCHEMA_FILE_NAME
+    schema_path.unlink(missing_ok=True)
 
     all_slices = set(files_by_slice.keys())
     output_paths = get_output_paths(output_folder, all_slices, overwrite)
-    global_offset = 0
     for slice in all_slices:
         files_by_slice[slice]["output_path"] = output_paths[slice]
         files_by_slice[slice]["all_slices"] = all_slices
-        if scratch is not None:
-            files_by_slice[slice]["scratch_path"] = scratch
-
-        total_length = get_total_length(files_by_slice[slice])
-        files_by_slice[slice]["global_offset"] = global_offset
-        global_offset += total_length
+        files_by_slice[slice]["schema_path"] = schema_path
 
     return files_by_slice
-
-
-def get_total_length(files_by_slice):
-    core_files = files_by_slice[FileType.CORE]
-    synth_core_files = files_by_slice.get(FileType.SYNTH_CORE, [])
-    total = 0
-    for file in core_files + synth_core_files:
-        with h5py.File(file) as f:
-            ds = next(iter(f["data"].values()))
-            total += len(ds)
-    return total
 
 
 def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool):
@@ -105,13 +91,6 @@ def verify_file_lists(
         logger.critical("Found no core files to convert!")
         sys.exit()
 
-    all_core_files = list(chain(*[files for files in core_files_by_slice.values()]))
-    all_synth_core_files = list(
-        chain(*[files for files in synthetic_core_files_by_slice.values()])
-    )
-    verify_incoming_metadata(all_core_files + all_synth_core_files)
-    logger.success("Metadata is consistent across files!")
-
     if not synthetic_core_files_by_slice:
         return True
 
@@ -135,24 +114,14 @@ def verify_file_lists(
 
 
 def get_files_by_slice(folder: Path) -> dict[int, list[Path]]:
-    core_files = filter(is_catalog_file, Path(folder).glob("*.hdf5"))
-    core_files = list(core_files)
-
-    redshift_slices = set()
-    for file in core_files:
-        slice = int(
-            file.stem.split("-")[1].split(".")[0]
-        )  # we should include this information in the metadata
-        redshift_slices.add(slice)
-
-    files_by_slice = {}
-
-    for slice in redshift_slices:
-        core_slice_files = list(
-            filter(lambda f: f"lc_cores-{slice}" in f.stem, core_files)
-        )
-        files_by_slice[slice] = core_slice_files
-    return files_by_slice
+    # Files are found by name alone, since opening each one is slow on a network
+    # file system. Whether they really are catalog files is checked on conversion.
+    files_by_slice = defaultdict(list)
+    for file in Path(folder).glob("*.hdf5"):
+        match = CATALOG_FILE_PATTERN.fullmatch(file.name)
+        if match is not None:
+            files_by_slice[int(match.group(1))].append(file)
+    return dict(files_by_slice)
 
 
 def split_slice_files(files_by_slice: dict[int, list[Path]]):
@@ -171,12 +140,3 @@ def split_slice_files(files_by_slice: dict[int, list[Path]]):
 
 def get_file_pixel(path: Path):
     return int(path.stem.split(".")[1])
-
-
-def is_catalog_file(path: Path) -> bool:
-    with h5py.File(path) as f:
-        if "data" not in f.keys() or "metadata" not in f.keys():
-            return False
-        elif "mock_version_name" not in f["metadata"].attrs.keys():
-            return False
-        return True
