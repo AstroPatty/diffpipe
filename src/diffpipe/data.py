@@ -34,8 +34,30 @@ COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
 
+# In-memory output files grow in steps of this size. HDF5's 64 KiB default would
+# mean reallocating (and copying) a multi-GB image thousands of times
+OUTPUT_BLOCK_SIZE = 64 * 1024**2
 
-def process_slice(slice, step_data, index_depth, simulation):
+
+def open_input(path: Path, in_memory: bool) -> h5py.File:
+    if in_memory:
+        # Read the whole file with one sequential read, rather than one small read
+        # per chunk and metadata block
+        return h5py.File(path, "r", driver="core", backing_store=False)
+    return h5py.File(path, "r")
+
+
+def open_output(path: Path, in_memory: bool) -> h5py.File:
+    if in_memory:
+        # Build the file in memory, and write it with one sequential write on close.
+        # Calling flush() on this file writes out the entire image, so don't.
+        return h5py.File(
+            path, "w", driver="core", backing_store=True, block_size=OUTPUT_BLOCK_SIZE
+        )
+    return h5py.File(path, "w")
+
+
+def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
     logger.info(f"Working on slice {slice}")
     core_files = step_data[FileType.CORE]  # required
     output_path = step_data["output_path"]  # required
@@ -77,13 +99,14 @@ def process_slice(slice, step_data, index_depth, simulation):
         files[FileType.SYNTH_CORE] = synth_core_files
 
     # Each file is opened exactly once, and the open files are passed to everything
-    # that needs them. The output is closed before the inputs.
+    # that needs them. The output is closed (and so, when in memory, written out)
+    # before the inputs.
     with ExitStack() as stack:
         sources = {
-            file_type: [stack.enter_context(h5py.File(p, "r")) for p in paths]
+            file_type: [stack.enter_context(open_input(p, in_memory)) for p in paths]
             for file_type, paths in files.items()
         }
-        target = stack.enter_context(h5py.File(file_output_path, "w"))
+        target = stack.enter_context(open_output(file_output_path, in_memory))
 
         pixels_with_data = write_files(sources, target, index_depth, global_offset)
         z_phot_table = get_z_phot_tables(sources)

@@ -34,6 +34,12 @@ def diffpipe():
 @click.option("--scratch", required=False, type=OUTPUT_FOLDER)
 @click.option("--pre-copy", "-p", is_flag=True)
 @click.option(
+    "--in-memory/--no-in-memory",
+    default=True,
+    help="Read each input file and build each output file in memory, so the "
+    "filesystem only sees large sequential reads and writes. Defaults to on",
+)
+@click.option(
     "--overwrite",
     "-o",
     is_flag=True,
@@ -70,6 +76,7 @@ def run(
     output_folder: Path,
     scratch: Optional[Path],
     pre_copy: bool,
+    in_memory: bool,
     overwrite: bool,
     n_procs: Optional[int],
     index_depth: int,
@@ -106,7 +113,9 @@ def run(
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
     logger.info(f"Running conversion with {n_procs} processes")
-    run_step_f = partial(run_step, index_depth=index_depth, simulation=simulation)
+    run_step_f = partial(
+        run_step, index_depth=index_depth, simulation=simulation, in_memory=in_memory
+    )
     with ProcessPoolExecutor(max_workers=n_procs) as ex:
         futures = [ex.submit(run_step_f, item) for item in work_orders.items()]
         for fut in as_completed(futures):
@@ -115,9 +124,9 @@ def run(
     logger.success("All files processed!")
 
 
-def run_step(step_data, index_depth: int, simulation: str):
+def run_step(step_data, index_depth: int, simulation: str, in_memory: bool):
     step, data = step_data
-    return process_slice(step, data, index_depth, simulation)
+    return process_slice(step, data, index_depth, simulation, in_memory)
 
 
 diffpipe.add_command(run)
