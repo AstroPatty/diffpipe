@@ -1,6 +1,5 @@
 import multiprocessing
 import os
-import shutil
 import sys
 from functools import partial
 from pathlib import Path
@@ -33,13 +32,21 @@ def diffpipe():
 @click.command()
 @click.argument("input_folder", required=True, type=DATA_FOLDER)
 @click.argument("output_folder", required=True, type=OUTPUT_FOLDER)
-@click.option("--scratch", required=False, type=OUTPUT_FOLDER)
-@click.option("--pre-copy", "-p", is_flag=True)
+@click.option(
+    "--scratch",
+    required=False,
+    type=OUTPUT_FOLDER,
+    help="Fast local storage to write outputs to. Each output is written there "
+    "directly, copied to OUTPUT_FOLDER in the background as soon as it is finished, "
+    "and then removed from scratch",
+)
+@click.option("--pre-copy", "-p", is_flag=True, hidden=True)
 @click.option(
     "--in-memory/--no-in-memory",
     default=True,
-    help="Read each input file and build each output file in memory, so the "
-    "filesystem only sees large sequential reads and writes. Defaults to on",
+    help="Read each input file into memory, and build each output file in memory "
+    "unless writing to --scratch, so the filesystem only sees large sequential reads "
+    "and writes. Defaults to on",
 )
 @click.option(
     "--max-memory",
@@ -104,22 +111,19 @@ def run(
         logger.critical("Terminating due to previous error")
         sys.exit(1)
 
+    if pre_copy:
+        logger.warning(
+            "--pre-copy is deprecated and has no effect. Inputs are no longer copied "
+            "to scratch"
+        )
+
+    work_orders = build_work_orders(input_folder, output_folder, simulation, overwrite)
+    logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
+
     scratch_path = scratch
     if scratch is not None:
         scratch_path = scratch / "diffpipe"
         scratch_path.mkdir(parents=False, exist_ok=False)
-
-    if pre_copy and scratch_path is not None:
-        logger.info("Copying data to scratch...")
-        files_to_copy = input_folder.glob("*.hdf5")
-        for file in files_to_copy:
-            shutil.copy(file, scratch_path)
-        input_folder = scratch_path
-
-    work_orders = build_work_orders(
-        input_folder, output_folder, scratch_path, simulation, overwrite
-    )
-    logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
 
@@ -136,23 +140,39 @@ def run(
 
     logger.info(f"Running conversion with {n_procs} processes")
     run_step_f = partial(
-        run_step, index_depth=index_depth, simulation=simulation, in_memory=in_memory
+        run_step,
+        index_depth=index_depth,
+        simulation=simulation,
+        inputs_in_memory=in_memory,
+        # Outputs on scratch are written to it directly: local disk handles small
+        # writes well, and the memory is better spent running more slices at once
+        output_in_memory=in_memory and scratch_path is None,
     )
     schema_path = output_folder / SCHEMA_FILE_NAME
     try:
-        run_slices(work_orders, run_step_f, n_procs, memory_budget)
+        run_slices(work_orders, run_step_f, n_procs, scratch_path, memory_budget)
     except BadInputError:
         logger.critical("Terminating due to previous error")
         sys.exit(1)
     finally:
         schema_path.unlink(missing_ok=True)
+    if scratch_path is not None:
+        scratch_path.rmdir()
 
     logger.success("All files processed!")
 
 
-def run_step(step_data, index_depth: int, simulation: str, in_memory: bool):
+def run_step(
+    step_data,
+    index_depth: int,
+    simulation: str,
+    inputs_in_memory: bool,
+    output_in_memory: bool,
+):
     step, data = step_data
-    return process_slice(step, data, index_depth, simulation, in_memory)
+    return process_slice(
+        step, data, index_depth, simulation, inputs_in_memory, output_in_memory
+    )
 
 
 diffpipe.add_command(run)

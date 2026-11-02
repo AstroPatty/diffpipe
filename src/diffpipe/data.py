@@ -1,8 +1,6 @@
-import shutil
 from contextlib import ExitStack
 from itertools import chain
 from pathlib import Path
-from typing import Optional
 
 import astropy.units as u
 import h5py
@@ -63,53 +61,30 @@ def open_output(path: Path, in_memory: bool) -> h5py.File:
     return h5py.File(path, "w")
 
 
-def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
+def process_slice(
+    slice,
+    step_data,
+    index_depth,
+    simulation,
+    inputs_in_memory=True,
+    output_in_memory=True,
+):
     logger.info(f"Working on slice {slice}")
-    core_files = step_data[FileType.CORE]  # required
     output_path = step_data["output_path"]  # required
     all_slices = step_data["all_slices"]  # required
     id_offset = slice << SLICE_ID_SHIFT
     schema_path = step_data["schema_path"]  # required
-    scratch_path: Optional[Path] = step_data.get("scratch_path")
-    synth_core_files = step_data.get(FileType.SYNTH_CORE)  # optional
-
-    if scratch_path is not None:
-        is_in_scratch = [f.is_relative_to(scratch_path) for f in core_files]
-        if synth_core_files is not None:
-            is_in_scratch.extend(
-                f.is_relative_to(scratch_path) for f in synth_core_files
-            )
-
-        scratch_output = scratch_path / "output"
-        scratch_output.mkdir(parents=False, exist_ok=True)
-        file_output_path = scratch_output / output_path.name
-
-        if not any(is_in_scratch):
-            logger.info(f"Copying data for slice {slice} to scratch at {scratch_path}")
-            for file in core_files:
-                shutil.copy(file, scratch_path)
-            core_files = [scratch_path / f.name for f in core_files]
-            if synth_core_files is not None:
-                for file in synth_core_files:
-                    shutil.copy(file, scratch_path)
-                synth_core_files = [scratch_path / f.name for f in synth_core_files]
-        elif not all(is_in_scratch):
-            raise ValueError(
-                "Found a mixture of slices both in and out of scratch... Aborting!"
-            )
-
-    else:
-        file_output_path = output_path
-
-    files = {FileType.CORE: core_files}
-    if synth_core_files is not None:
-        files[FileType.SYNTH_CORE] = synth_core_files
+    files = {FileType.CORE: step_data[FileType.CORE]}  # required
+    if FileType.SYNTH_CORE in step_data:  # optional
+        files[FileType.SYNTH_CORE] = step_data[FileType.SYNTH_CORE]
 
     # Each file is opened exactly once, and verified once it is open. The output is
     # closed (and so, when in memory, written out) before the inputs.
     with ExitStack() as stack:
         sources = {
-            file_type: [stack.enter_context(open_input(p, in_memory)) for p in paths]
+            file_type: [
+                stack.enter_context(open_input(p, inputs_in_memory)) for p in paths
+            ]
             for file_type, paths in files.items()
         }
         try:
@@ -119,7 +94,7 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
         except BadInputError as e:
             logger.critical(f"Slice {slice}: {e}")
             raise
-        target = stack.enter_context(open_output(file_output_path, in_memory))
+        target = stack.enter_context(open_output(output_path, output_in_memory))
 
         pixels_with_data = write_files(sources, target, index_depth, id_offset)
         z_phot_table = get_z_phot_tables(sources)
@@ -134,14 +109,6 @@ def process_slice(slice, step_data, index_depth, simulation, in_memory=True):
             index_depth,
             z_phot_table,
         )
-
-    if scratch_path is not None:
-        shutil.copy(file_output_path, output_path)
-        file_output_path.unlink()
-        all_files = core_files + (synth_core_files or [])
-        for file in all_files:
-            assert file.is_relative_to(scratch_path)
-            file.unlink()
 
     logger.success(f"Successfully wrote data for slice {slice}")
 

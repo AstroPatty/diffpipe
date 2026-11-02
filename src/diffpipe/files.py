@@ -3,7 +3,7 @@ import sys
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 from loguru import logger
 
@@ -24,7 +24,6 @@ class FileType(Enum):
 def build_work_orders(
     input_folder: Path,
     output_folder: Path,
-    scratch: Optional[Path],
     simulation: str,
     overwrite: bool,
 ):
@@ -42,8 +41,6 @@ def build_work_orders(
         files_by_slice[slice]["output_path"] = output_paths[slice]
         files_by_slice[slice]["all_slices"] = all_slices
         files_by_slice[slice]["schema_path"] = schema_path
-        if scratch is not None:
-            files_by_slice[slice]["scratch_path"] = scratch
 
     return files_by_slice
 
