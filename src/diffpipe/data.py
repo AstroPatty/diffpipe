@@ -31,6 +31,7 @@ u.add_enabled_units(cu)
 COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
+GAL_ID = "gal_id"
 
 
 def process_slice(slice, step_data, index_depth, simulation):
@@ -272,9 +273,12 @@ def write_single_file(max_level, source_files, file_target, file_map, global_off
             write_column(
                 file_target["data"], column_sources, column_name, file_map[file_type]
             )
-        file_target["data"]["gal_id"][:] = global_offset + np.arange(
-            0, len(file_target["data"]["gal_id"])
-        )
+        # Keep the gal_id assigned upstream by diffsky if present; otherwise
+        # generate our own.
+        if GAL_ID not in known_columns[0]:
+            file_target["data"][GAL_ID][:] = global_offset + np.arange(
+                0, len(file_target["data"][GAL_ID])
+            )
 
         return
 
@@ -294,10 +298,10 @@ def write_single_file(max_level, source_files, file_target, file_map, global_off
                 column_name,
                 file_map[file_type],
             )
-        dataset_length = len(dataset_group["gal_id"])
-        ids = global_offset + local_offset + np.arange(dataset_length)
-
-        dataset_group["gal_id"][:] = ids
+        dataset_length = len(dataset_group[GAL_ID])
+        if GAL_ID not in known_columns[0]:
+            ids = global_offset + local_offset + np.arange(dataset_length)
+            dataset_group[GAL_ID][:] = ids
 
         local_offset += dataset_length
 
@@ -345,8 +349,10 @@ def allocate_dataset_group(group, source_files, total_length):
         for colname, col in columns.items():
             shapes[colname] = col.shape[1:]
             dtypes[colname] = col.dtype
-    dtypes["gal_id"] = np.int64
-    shapes["gal_id"] = ()
+    if GAL_ID not in dtypes:
+        # diffsky did not assign galaxy IDs; write_single_file will generate them
+        dtypes[GAL_ID] = np.int64
+        shapes[GAL_ID] = ()
 
     for col, dtype in dtypes.items():
         if col in COLUMNS_TO_SKIP:

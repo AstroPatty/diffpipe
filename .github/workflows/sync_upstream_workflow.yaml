@@ -1,0 +1,82 @@
+name: Sync mockgen workflow from diffsky
+
+# mockgen_opencosmo.yaml mirrors the "mockgen_opencosmo" workflow in
+# https://github.com/ArgonneCPAC/diffsky. This job periodically checks upstream
+# for changes and opens a PR that merges them into the local copy, keeping the
+# local adaptations. See .github/scripts/sync_upstream_workflow.sh.
+#
+# Requires a repository secret WORKFLOW_SYNC_TOKEN: a personal access token (or
+# GitHub App token) with Contents, Pull requests and Workflows read/write. The
+# default GITHUB_TOKEN cannot be used because
+#   1. it is not allowed to modify files under .github/workflows, and
+#   2. PRs it opens do not trigger other workflows, so the mock generation and
+#      property tests would never run on the sync PR.
+
+on:
+  workflow_dispatch: null
+  schedule:
+    # Daily at 6:17am Central, ahead of the Monday/Thursday scheduled test runs
+    - cron: '17 11 * * *'
+  pull_request:
+    paths:
+      - .github/scripts/sync_upstream_workflow.sh
+      - .github/workflows/sync_upstream_workflow.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync with upstream diffsky workflow
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - name: check for sync token
+        env:
+          TOKEN: ${{ secrets.WORKFLOW_SYNC_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Repository secret WORKFLOW_SYNC_TOKEN is not set (see comment at top of this workflow)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.WORKFLOW_SYNC_TOKEN }}
+
+      - name: merge upstream workflow into local copy
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_SYNC_TOKEN }}
+        run: .github/scripts/sync_upstream_workflow.sh
+
+      - name: validate merged workflow is well-formed YAML
+        if: steps.sync.outputs.changed == 'true' && steps.sync.outputs.conflicts == '0'
+        run: |
+          python -m pip install --quiet pyyaml
+          python -c "import yaml; yaml.safe_load(open('.github/workflows/mockgen_opencosmo.yaml'))"
+
+      # Skipped on pull_request runs (which only exercise the script above) so
+      # that editing the sync machinery never opens a sync PR.
+      - name: open or update sync PR
+        if: github.event_name != 'pull_request' && steps.sync.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.WORKFLOW_SYNC_TOKEN }}
+          branch: automation/sync-mockgen-workflow
+          delete-branch: true
+          add-paths: |
+            .github/workflows/mockgen_opencosmo.yaml
+            .github/upstream/
+          commit-message: "CI: sync mockgen workflow with diffsky@${{ steps.sync.outputs.sha }}"
+          title: "CI: sync mockgen workflow with upstream diffsky"
+          draft: ${{ steps.sync.outputs.conflicts != '0' }}
+          body: |
+            Automated sync of `.github/workflows/mockgen_opencosmo.yaml` with
+            [`mockgen_opencosmo.yaml`](https://github.com/ArgonneCPAC/diffsky/blob/${{ steps.sync.outputs.sha }}/.github/workflows/mockgen_opencosmo.yaml)
+            in diffsky at `${{ steps.sync.outputs.sha }}`.
+
+            Upstream changes were three-way merged into the local workflow, so local
+            adaptations are kept. Unresolved merge conflicts: **${{ steps.sync.outputs.conflicts }}**.
+
+            ${{ steps.sync.outputs.conflicts != '0' && '**This PR has conflict markers in the workflow file and is a draft. Check out the branch, resolve the `<<<<<<<` / `>>>>>>>` blocks, and push before merging.**' || 'The mock generation and property tests run on this PR; review the diff and merge if they pass.' }}
