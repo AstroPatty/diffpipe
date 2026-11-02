@@ -13,6 +13,7 @@ from diffpipe import BadInputError
 from diffpipe.data import process_slice
 from diffpipe.files import build_work_orders
 from diffpipe.header import get_simulation_header_data
+from diffpipe.schema import SCHEMA_FILE_NAME
 
 DATA_FOLDER = click.Path(
     exists=True, file_okay=False, readable=True, resolve_path=True, path_type=Path
@@ -116,10 +117,17 @@ def run(
     run_step_f = partial(
         run_step, index_depth=index_depth, simulation=simulation, in_memory=in_memory
     )
-    with ProcessPoolExecutor(max_workers=n_procs) as ex:
-        futures = [ex.submit(run_step_f, item) for item in work_orders.items()]
-        for fut in as_completed(futures):
-            fut.result()
+    schema_path = output_folder / SCHEMA_FILE_NAME
+    try:
+        with ProcessPoolExecutor(max_workers=n_procs) as ex:
+            futures = [ex.submit(run_step_f, item) for item in work_orders.items()]
+            for fut in as_completed(futures):
+                fut.result()
+    except BadInputError:
+        logger.critical("Terminating due to previous error")
+        sys.exit(1)
+    finally:
+        schema_path.unlink(missing_ok=True)
 
     logger.success("All files processed!")
 
