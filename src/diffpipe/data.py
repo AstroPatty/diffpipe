@@ -33,7 +33,11 @@ COLUMNS_TO_SKIP = ["ra", "dec"]
 COLUMN_RENAMES = {"ra_nfw": "ra", "dec_nfw": "dec"}
 UNIT_MAP = {"ra_obs": u.deg, "dec_obs": u.deg}
 
-# A galaxy's gal_id is its slice in the bits above this one, and its row within the
+# Column holding each galaxy's id. Inputs may ship with their own ids, which are kept
+# as they are. Otherwise diffpipe generates them (see SLICE_ID_SHIFT).
+ID_COLUMN = "gal_id"
+
+# A generated gal_id is its slice in the bits above this one, and its row within the
 # slice below. Ids are unique across slices without any slice needing the length of
 # another, and leave room for 2**40 (~1e12) rows per slice
 SLICE_ID_SHIFT = 40
@@ -213,9 +217,9 @@ def write_single_file(source_files, file_target, file_map, id_offset):
             write_column(
                 file_target["data"], column_sources, column_name, file_map[file_type]
             )
-        file_target["data"]["gal_id"][:] = id_offset + np.arange(
-            0, len(file_target["data"]["gal_id"])
-        )
+        if ID_COLUMN not in known_columns[0]:
+            ids = file_target["data"][ID_COLUMN]
+            ids[:] = id_offset + np.arange(0, len(ids))
 
         return
 
@@ -234,10 +238,10 @@ def write_single_file(source_files, file_target, file_map, id_offset):
                 column_name,
                 file_map[file_type],
             )
-        dataset_length = len(dataset_group["gal_id"])
-        ids = id_offset + local_offset + np.arange(dataset_length)
-
-        dataset_group["gal_id"][:] = ids
+        dataset_length = len(dataset_group[ID_COLUMN])
+        if ID_COLUMN not in known_columns[0]:
+            ids = id_offset + local_offset + np.arange(dataset_length)
+            dataset_group[ID_COLUMN][:] = ids
 
         local_offset += dataset_length
 
@@ -282,8 +286,11 @@ def allocate_dataset_group(group, sources, total_length):
     for colname, col in columns.items():
         shapes[colname] = col.shape[1:]
         dtypes[colname] = col.dtype
-    dtypes["gal_id"] = np.int64
-    shapes["gal_id"] = ()
+    # Ids that ship with the inputs are copied like any other column. Otherwise, make
+    # room for generated ones
+    if ID_COLUMN not in dtypes:
+        dtypes[ID_COLUMN] = np.int64
+        shapes[ID_COLUMN] = ()
 
     for col, dtype in dtypes.items():
         if col in COLUMNS_TO_SKIP:
