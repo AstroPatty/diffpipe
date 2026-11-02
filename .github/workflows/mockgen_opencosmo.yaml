@@ -1,3 +1,8 @@
+# Mirrors the "mockgen_opencosmo" workflow in https://github.com/ArgonneCPAC/diffsky
+# (.github/workflows/mockgen_opencosmo.yaml), adapted to test this checkout of
+# diffpipe. Upstream changes are merged in automatically by
+# sync_upstream_workflow.yaml. To make those merges clean, keep this file as close
+# to upstream as possible and keep local changes small and self-contained.
 name: Test diffpipe works with make_lj_mock.py
 
 on:
@@ -12,8 +17,17 @@ on:
 
 jobs:
   mock-generation:
-    name: python make_lj_mock.py testing_lj_mock_config.yaml
+    name: python make_lj_mock.py testing_lj_mock_config.yaml (opencosmo ${{ matrix.opencosmo }})
     runs-on: "ubuntu-latest"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        opencosmo: [release, main]
+
+    env:
+      # Force UCX to use standard TCP/shared memory
+      UCX_TLS: "tcp,self,sm"
 
     steps:
       - name: free disk space
@@ -26,7 +40,13 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
+          repository: ArgonneCPAC/diffsky
           fetch-depth: 0
+
+      # diffpipe: check out the code under test alongside diffsky
+      - uses: actions/checkout@v7
+        with:
+          path: diffpipe
 
       - uses: conda-incubator/setup-miniconda@v4
         with:
@@ -38,38 +58,41 @@ jobs:
 
       - name: configure conda and install code
         shell: bash -l {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.CPAC_PRIVATE_REPO_TOKEN }}
+          GITHUB_USER: ${{ secrets.GH_USR_TESTING_TOKEN }}
 
         run: |
           conda config --set always_yes yes
+          conda install --quiet \
+            --file=requirements.txt
           conda install --quiet \
             pip \
             setuptools \
             "setuptools_scm>=7,<8" \
             matplotlib \
-            astropy \
+            astropy>=7 \
             h5py \
             mpi4py \
             mpich \
-            opencosmo \
-            diffmah \
-            diffhalos \
-            diffstar \
-            dsps \
-            diffhalos \
-            diffsky
+            pytest \
+            opencosmo
           conda uninstall diffmah --force
           conda uninstall diffstar --force
           conda uninstall dsps --force
           conda uninstall diffhalos --force
-          conda uninstall diffsky --force
           pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/diffmah.git
           pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/diffstar.git
           pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/dsps.git
           pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/diffhalos.git
-          pip install --no-deps --no-build-isolation git+https://github.com/ArgonneCPAC/diffsky.git
 
-          pip install git+https://github.com/ArgonneCPAC/opencosmo.git
-          python -m pip install .
+          if [ "${{ matrix.opencosmo }}" = "main" ]; then
+            pip install git+https://github.com/ArgonneCPAC/opencosmo.git
+          fi
+          pip install ./diffpipe
+
+          python -m pip install --no-build-isolation --no-deps -e .
+
       - name: download dsps data
         timeout-minutes: 5
         shell: bash -l {0}
@@ -105,6 +128,7 @@ jobs:
           wget $WGET_OPTS -P step_453 https://github.com/ArgonneCPAC/diffsky-data/releases/download/hacc-data-lastjourney-v3/lc_cores-453.843.hdf5
           wget $WGET_OPTS -P step_464 https://github.com/ArgonneCPAC/diffsky-data/releases/download/hacc-data-lastjourney-v3/lc_cores-464.843.hdf5
           cd ../..
+
           # Set environment variable
           export DSPS_DRN="${GITHUB_WORKSPACE}/dsps_drn"
           echo "DSPS_DRN=${DSPS_DRN}" >> $GITHUB_ENV
@@ -112,14 +136,14 @@ jobs:
       - name: create mock with cosmos_fit option
         shell: bash -l {0}
         run: |
-          git clone https://github.com/ArgonneCPAC/diffsky.git
-
           # Create output directory
           mkdir -p ci_test_output
 
           # Run mock production script with real halos and synthetics
-          mpiexec -n 1 python diffsky/scripts/LJ_LC_MOCKS/make_lj_mock.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
-          mpiexec -n 1 python diffsky/scripts/LJ_LC_MOCKS/make_lj_mock.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml -synthetic_cores 1
+          mpiexec -n 1 python scripts/LJ_LC_MOCKS/make_lj_mock.py scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
+          mpiexec -n 1 python scripts/LJ_LC_MOCKS/make_lj_mock.py scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml -synthetic_cores 1
+
+          python scripts/LJ_LC_MOCKS/add_galaxy_id_to_mock.py scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml -drn_mock ci_test_output/dummy_version_name
 
           cp LastJourney/core-lc-9/lc_cores-decomposition.txt ci_test_output/dummy_version_name/
 
@@ -131,10 +155,10 @@ jobs:
       - name: validate mock
         shell: bash -l {0}
         run: |
-          python diffsky/scripts/LJ_LC_MOCKS/check_lc_mock_completeness.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml -drn_out ci_test_output/dummy_version_name
-          python diffsky/scripts/LJ_LC_MOCKS/inspect_lc_mock.py diffsky/scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
+          python scripts/LJ_LC_MOCKS/check_lc_mock_completeness.py scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml -drn_out ci_test_output/dummy_version_name
+          python scripts/LJ_LC_MOCKS/inspect_lc_mock.py scripts/LJ_LC_MOCKS/testing_lj_mock_config.yaml
 
-      - name: OpenCosmo toolkit data conversion (with synthetic halos)
+      - name: OpenCosmo toolkit data conversion
         shell: bash -l {0}
         run: |
           mkdir -p ci_test_output/oc_dummy_version_name
@@ -142,20 +166,30 @@ jobs:
           rm -rf ci_test_output/oc_dummy_version_name/lc_cores*.hdf5
           diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name -n 2
 
+      - name: Run tests on OpenCosmo-formatted data
+        shell: bash -l {0}
+        run: |
+          echo "ci_test_output/oc_dummy_version_name ready for testing"
+          # Here we can execute a testing script of ci_test_output/oc_dummy_version_name
+          export RUN_OPENCOSMO_TESTS="true"
+          export OPENCOSMO_DIFFSKY_DATA_PATH="ci_test_output/oc_dummy_version_name"
+          pytest diffsky/data_loaders/opencosmo_utils/test
+
+      # diffpipe: begin local steps
       # Emit both schemas as artifacts *before* the no-synthetics step below
       # mutates the input catalog, so the property test suite receives a
       # complete, matched input/output pair.
       - name: Upload diffsky input catalog artifact
         uses: actions/upload-artifact@v7
         with:
-          name: diffsky-input-catalog
+          name: diffsky-input-catalog-opencosmo-${{ matrix.opencosmo }}
           path: ci_test_output/dummy_version_name
           if-no-files-found: error
 
       - name: Upload OpenCosmo output catalog artifact
         uses: actions/upload-artifact@v7
         with:
-          name: opencosmo-output-catalog
+          name: opencosmo-output-catalog-opencosmo-${{ matrix.opencosmo }}
           path: ci_test_output/oc_dummy_version_name
           if-no-files-found: error
 
@@ -167,16 +201,23 @@ jobs:
           rm -rf ci_test_output/oc_dummy_version_name_no_synthetics/lc_cores*.hdf5
           rm -rf ci_test_output/dummy_version_name/lc_cores-*.synthetic_halos.hdf5
           diffpipe run ci_test_output/dummy_version_name ci_test_output/oc_dummy_version_name_no_synthetics -n 2
+      # diffpipe: end local steps
 
-      - name: Clean up mock data
+      - name: remove cosmos_fit mock
         shell: bash -l {0}
         run: |
           rm -rf ci_test_output
 
+  # diffpipe: local job, not present upstream
   property-tests:
-    name: pytest property test suite
+    name: pytest property test suite (opencosmo ${{ matrix.opencosmo }})
     needs: mock-generation
     runs-on: "ubuntu-latest"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        opencosmo: [release, main]
 
     steps:
       - uses: actions/checkout@v7
@@ -188,23 +229,25 @@ jobs:
       - name: Download diffsky input catalog artifact
         uses: actions/download-artifact@v8
         with:
-          name: diffsky-input-catalog
+          name: diffsky-input-catalog-opencosmo-${{ matrix.opencosmo }}
           path: test-data/input
 
       - name: Download OpenCosmo output catalog artifact
         uses: actions/download-artifact@v8
         with:
-          name: opencosmo-output-catalog
+          name: opencosmo-output-catalog-opencosmo-${{ matrix.opencosmo }}
           path: test-data/output
 
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest h5py numpy opencosmo
+          if [ "${{ matrix.opencosmo }}" = "main" ]; then
+            python -m pip install git+https://github.com/ArgonneCPAC/opencosmo.git
+          fi
 
       - name: Run property test suite
         env:
           DIFFPIPE_TEST_DATA_DIR: ${{ github.workspace }}/test-data
         run: |
           pytest tests -v
-
