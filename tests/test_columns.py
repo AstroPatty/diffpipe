@@ -92,16 +92,34 @@ def _partition_by_step(files):
     return dict(output)
 
 
-def test_column_metadata(input_files, output_files):
-    """Both catalog directories exist and contain HDF5 files."""
+def _is_synthetic(file) -> bool:
+    return ".synthetic_halos." in str(file)
 
-    # diffpipe already asserts during its run that matching columns have
-    # matching columns across input files have matching metadata, so we
-    # only need to check one input file
-    with h5py.File(input_files[0]) as f:
+
+def _input_metadata(file):
+    with h5py.File(file) as f:
         dtypes, attrs = _get_column_metadata(f["data"])
-    dtypes = _apply_renames(dtypes)
-    attrs = _apply_renames(attrs)
+    return _apply_renames(dtypes), _apply_renames(attrs)
+
+
+def test_column_metadata(input_files, output_files):
+    """Output columns keep the dtypes and attributes of their input columns.
+
+    diffsky does not write real and synthetic galaxies with the same dtypes
+    (e.g. float32 vs float64), and diffpipe preserves each source's dtypes in
+    its own group. So "cores" is checked against a real-halo input file and
+    "synth_cores" against a synthetic-halo input file.
+    """
+    # diffpipe already asserts during its run that matching columns across
+    # input files have consistent metadata, so one input file of each kind is
+    # enough as a reference.
+    real_inputs = [f for f in input_files if not _is_synthetic(f)]
+    synth_inputs = [f for f in input_files if _is_synthetic(f)]
+    assert real_inputs, "No real-halo input files found"
+    assert synth_inputs, "No synthetic-halo input files found"
+
+    dtypes_real, attrs_real = _input_metadata(real_inputs[0])
+    dtypes_synth_in, attrs_synth_in = _input_metadata(synth_inputs[0])
 
     for ofile in output_files:
         with h5py.File(ofile) as f:
@@ -110,10 +128,10 @@ def test_column_metadata(input_files, output_files):
                 f["synth_cores"]["data"]
             )
 
-        _verify_dtypes(dtypes, dtypes_cores)
-        _verify_dtypes(dtypes, dtypes_synth)
-        _verify_attrs(attrs, attrs_cores)
-        _verify_attrs(attrs, attrs_synth)
+        _verify_dtypes(dtypes_real, dtypes_cores)
+        _verify_dtypes(dtypes_synth_in, dtypes_synth)
+        _verify_attrs(attrs_real, attrs_cores)
+        _verify_attrs(attrs_synth_in, attrs_synth)
 
 
 def test_data_consistency(input_files, output_files):
