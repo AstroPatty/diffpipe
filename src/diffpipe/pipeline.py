@@ -13,13 +13,10 @@ from diffpipe.files import FileType
 
 # Estimated peak memory of a slice processed in memory, relative to the size of its
 # inputs: the input images, the output image, and column-sized temporaries.
-# Measured at ~3.2x, with some headroom.
-IN_MEMORY_OVERHEAD = 3.5
+IN_MEMORY_OVERHEAD = 3.2
 # The same, when the output is written straight to scratch rather than built in
-# memory: the input images and column-sized temporaries. Not yet measured: estimated
-# from the above less the output image (~0.8x, see SCRATCH_OVERHEAD), so ~2.4x, with
-# similar headroom.
-IN_MEMORY_INPUTS_OVERHEAD = 2.7
+# memory: the input images and column-sized temporaries.
+IN_MEMORY_INPUTS_OVERHEAD = 2.4
 # Scratch space a slice's output needs relative to the size of its inputs. Outputs
 # are compressed, and measured at ~0.8x on the test data, with some headroom.
 SCRATCH_OVERHEAD = 1.0
