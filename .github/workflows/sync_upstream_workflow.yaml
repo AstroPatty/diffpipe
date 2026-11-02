@@ -1,6 +1,6 @@
 name: Sync mockgen workflow from diffsky
 
-# mockgen_opencosmo_main.yaml mirrors the "mockgen_opencosmo" workflow in
+# mockgen_opencosmo.yaml mirrors the "mockgen_opencosmo" workflow in
 # https://github.com/ArgonneCPAC/diffsky. This job periodically checks upstream
 # for changes and opens a PR that merges them into the local copy, keeping the
 # local adaptations. See .github/scripts/sync_upstream_workflow.sh.

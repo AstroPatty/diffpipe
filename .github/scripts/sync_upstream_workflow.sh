@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Sync .github/workflows/mockgen_opencosmo_main.yaml with the upstream diffsky
+# Sync .github/workflows/mockgen_opencosmo.yaml with the upstream diffsky
 # workflow "mockgen_opencosmo".
 #
 # The local workflow is an adapted copy of the upstream one (it tests diffpipe
 # rather than diffsky, uploads artifacts for the property tests, ...). To pull
 # in upstream changes without losing those adaptations we do a three-way merge:
 #
-#   ours   = .github/workflows/mockgen_opencosmo_main.yaml  (local, adapted)
+#   ours   = .github/workflows/mockgen_opencosmo.yaml  (local, adapted)
 #   base   = .github/upstream/mockgen_opencosmo.yaml        (upstream as last synced)
 #   theirs = upstream workflow at the current tip of diffsky main
 #
@@ -21,7 +21,7 @@ UPSTREAM_REPO="${UPSTREAM_REPO:-ArgonneCPAC/diffsky}"
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-main}"
 UPSTREAM_PATH=".github/workflows/mockgen_opencosmo.yaml"
 
-LOCAL=".github/workflows/mockgen_opencosmo_main.yaml"
+LOCAL=".github/workflows/mockgen_opencosmo.yaml"
 BASE=".github/upstream/mockgen_opencosmo.yaml"
 BASE_SHA=".github/upstream/mockgen_opencosmo.sha"
 
