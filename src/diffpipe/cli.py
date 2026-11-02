@@ -62,6 +62,14 @@ def diffpipe():
     help="Overwite any existing files in the output directory",
 )
 @click.option(
+    "--restart",
+    "-r",
+    is_flag=True,
+    help="Continue a run that didn't finish. Slices with a complete output in "
+    "OUTPUT_FOLDER are skipped, and the rest are converted. Unfinished outputs "
+    "(ending in .partial) are redone",
+)
+@click.option(
     "--n-procs",
     "-n",
     is_flag=False,
@@ -95,6 +103,7 @@ def run(
     in_memory: bool,
     max_memory: Optional[float],
     overwrite: bool,
+    restart: bool,
     n_procs: Optional[int],
     index_depth: int,
     simulation: str,
@@ -104,6 +113,9 @@ def run(
     placing them in OUTPUT_FOLDER. Can optionally also convert associated
     synthetic-core-based catalogs.
     """
+
+    if restart and overwrite:
+        raise click.UsageError("--restart and --overwrite can't be used together")
 
     try:
         _ = get_simulation_header_data(simulation)
@@ -117,7 +129,12 @@ def run(
             "to scratch"
         )
 
-    work_orders = build_work_orders(input_folder, output_folder, simulation, overwrite)
+    work_orders = build_work_orders(
+        input_folder, output_folder, simulation, overwrite, restart
+    )
+    if not work_orders:
+        logger.success("All slices are already done!")
+        return
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
 
     scratch_path = scratch

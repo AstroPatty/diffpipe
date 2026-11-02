@@ -26,7 +26,13 @@ def build_work_orders(
     output_folder: Path,
     simulation: str,
     overwrite: bool,
+    restart: bool = False,
 ):
+    """
+    Build the work order for every slice to convert. With restart, slices whose
+    output already exists are left out, since outputs only get their final name
+    once they are complete.
+    """
     _ = get_simulation_header_data(simulation)
     files_by_slice = build_file_lists(input_folder)
 
@@ -35,35 +41,48 @@ def build_work_orders(
     schema_path = output_folder / SCHEMA_FILE_NAME
     schema_path.unlink(missing_ok=True)
 
+    # Every slice is listed in each output's header, including any already done
     all_slices = set(files_by_slice.keys())
-    output_paths = get_output_paths(output_folder, all_slices, overwrite)
+    output_paths, completed = get_output_paths(
+        output_folder, all_slices, overwrite or restart
+    )
     for slice in all_slices:
         files_by_slice[slice]["output_path"] = output_paths[slice]
         files_by_slice[slice]["all_slices"] = all_slices
         files_by_slice[slice]["schema_path"] = schema_path
 
+    if restart and completed:
+        logger.info(f"Skipping slices {sorted(completed)}, which are already done")
+        for slice in completed:
+            del files_by_slice[slice]
     return files_by_slice
 
 
-def get_output_paths(output_folder: Path, slices: Iterable[int], overwrite: bool):
+def get_output_paths(output_folder: Path, slices: Iterable[int], allow_existing: bool):
+    """
+    Get the output path of every slice, and the slices whose output already exists.
+    Exits if any do, unless allow_existing.
+    """
     output_folder.mkdir(parents=True, exist_ok=True)
-    existing_hdf5_files = list(output_folder.glob("*.hdf5"))
-    if existing_hdf5_files:
+    # List the folder once, rather than checking for each output separately
+    existing = {p.name for p in output_folder.glob("*.hdf5")}
+    output_paths = {
+        slice: output_folder / f"lc_cores-{slice}.diffsky_gals.hdf5" for slice in slices
+    }
+    completed = {slice for slice, p in output_paths.items() if p.name in existing}
+    if completed and not allow_existing:
+        logger.critical(
+            f"Found existing catalog files for slices {sorted(completed)} in "
+            f"{output_folder}. Run with --overwrite to replace them, or --restart to "
+            "keep them and convert the remaining slices"
+        )
+        sys.exit()
+    if len(existing) > len(completed):
         logger.warning(
             "Output folder has existing hdf5 files, but there are no name clashes. Continuing anyway..."
         )
 
-    output_paths = {}
-    for slice in slices:
-        output_file_path = output_folder / Path(f"lc_cores-{slice}.diffsky_gals.hdf5")
-        if output_file_path.exists() and not overwrite:
-            logger.critical(
-                f"Found an existing catalog file at {output_file_path}. Run with --overwrite to ignore"
-            )
-            sys.exit()
-        output_paths[slice] = output_file_path
-
-    return output_paths
+    return output_paths, completed
 
 
 def build_file_lists(input_folder):
