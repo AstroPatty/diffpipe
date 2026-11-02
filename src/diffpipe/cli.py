@@ -1,7 +1,7 @@
 import multiprocessing
+import os
 import shutil
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 from typing import Optional
@@ -13,6 +13,7 @@ from diffpipe import BadInputError
 from diffpipe.data import process_slice
 from diffpipe.files import build_work_orders
 from diffpipe.header import get_simulation_header_data
+from diffpipe.pipeline import run_slices
 from diffpipe.schema import SCHEMA_FILE_NAME
 
 DATA_FOLDER = click.Path(
@@ -39,6 +40,13 @@ def diffpipe():
     default=True,
     help="Read each input file and build each output file in memory, so the "
     "filesystem only sees large sequential reads and writes. Defaults to on",
+)
+@click.option(
+    "--max-memory",
+    required=False,
+    type=float,
+    help="Memory (in GB) that slices being processed in memory may use at once. "
+    "Defaults to 75% of physical memory",
 )
 @click.option(
     "--overwrite",
@@ -78,6 +86,7 @@ def run(
     scratch: Optional[Path],
     pre_copy: bool,
     in_memory: bool,
+    max_memory: Optional[float],
     overwrite: bool,
     n_procs: Optional[int],
     index_depth: int,
@@ -113,16 +122,25 @@ def run(
     logger.info(f"Found data for redshift slices {list(work_orders.keys())}")
     if n_procs is None:
         n_procs = multiprocessing.cpu_count()
+
+    memory_budget = None
+    if in_memory:
+        if max_memory is None:
+            physical_memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+            memory_budget = int(0.75 * physical_memory)
+        else:
+            memory_budget = int(max_memory * 1e9)
+        logger.info(
+            f"Processing slices in memory, using up to {memory_budget / 1e9:.0f} GB"
+        )
+
     logger.info(f"Running conversion with {n_procs} processes")
     run_step_f = partial(
         run_step, index_depth=index_depth, simulation=simulation, in_memory=in_memory
     )
     schema_path = output_folder / SCHEMA_FILE_NAME
     try:
-        with ProcessPoolExecutor(max_workers=n_procs) as ex:
-            futures = [ex.submit(run_step_f, item) for item in work_orders.items()]
-            for fut in as_completed(futures):
-                fut.result()
+        run_slices(work_orders, run_step_f, n_procs, memory_budget)
     except BadInputError:
         logger.critical("Terminating due to previous error")
         sys.exit(1)
